@@ -59,42 +59,47 @@ serve(async (req) => {
       
       console.log(`Searching for: "${query}" in index: ${indexName}`);
 
-      // Search CyborgDB for relevant medical records
-      const searchResponse = await fetch(`${CYBORGDB_API_URL}/v1/search`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CYBORGDB_API_KEY}`,
-          'Content-Type': 'application/json',
-          ...(CYBORGDB_INDEX_KEY && { 'X-Index-Key': CYBORGDB_INDEX_KEY }),
-        },
-        body: JSON.stringify({
-          index: indexName,
-          query,
-          top_k: topK,
-          model: 'all-MiniLM-L6-v2',
-        }),
-      });
+      // Try CyborgDB, fall back to mock data if unavailable
+      try {
+        const searchResponse = await fetch(`${CYBORGDB_API_URL}/v1/search`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${CYBORGDB_API_KEY}`,
+            'Content-Type': 'application/json',
+            ...(CYBORGDB_INDEX_KEY && { 'X-Index-Key': CYBORGDB_INDEX_KEY }),
+          },
+          body: JSON.stringify({
+            index: indexName,
+            query,
+            top_k: topK,
+            model: 'all-MiniLM-L6-v2',
+          }),
+        });
 
-      if (!searchResponse.ok) {
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.json();
+          console.log(`Found ${searchData.results?.length || 0} results from CyborgDB`);
+
+          return new Response(JSON.stringify({
+            results: searchData.results || [],
+            source: 'cyborgdb',
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        
         const errorText = await searchResponse.text();
         console.error('CyborgDB search error:', searchResponse.status, errorText);
-        
-        // Return mock results for demo if CyborgDB fails
-        return new Response(JSON.stringify({
-          results: getMockResults(query),
-          source: 'mock',
-          message: 'Using demo data - CyborgDB connection pending',
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+      } catch (fetchError) {
+        console.log('CyborgDB not available, using demo mode:', fetchError);
       }
 
-      const searchData = await searchResponse.json();
-      console.log(`Found ${searchData.results?.length || 0} results`);
-
+      // Fallback to mock results
+      console.log('Using mock results for demo');
       return new Response(JSON.stringify({
-        results: searchData.results || [],
-        source: 'cyborgdb',
+        results: getMockResults(query),
+        source: 'demo',
+        message: 'Using demo data - configure CyborgDB for production',
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
