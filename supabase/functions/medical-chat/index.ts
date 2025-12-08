@@ -5,7 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const CYBORGDB_API_URL = "https://api.cyborgdb.com";
+// CyborgDB URL - set CYBORGDB_URL secret when you have a publicly accessible instance
+const CYBORGDB_API_URL = Deno.env.get('CYBORGDB_URL') || "https://api.cyborgdb.com";
 
 interface SearchRequest {
   query: string;
