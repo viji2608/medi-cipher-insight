@@ -168,16 +168,100 @@ serve(async (req) => {
       });
 
     } else if (action === 'generate') {
-      // Generate AI response based on context
+      // Generate AI response using Lovable AI
       const { query, context } = body;
+      const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
       
       console.log('Generating AI response for query:', query);
 
-      const response = generateMedicalResponse(query, context || []);
-      
-      return new Response(JSON.stringify({ response }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      if (!LOVABLE_API_KEY) {
+        console.error('LOVABLE_API_KEY not configured');
+        // Fallback to template response
+        const response = generateFallbackResponse(query, context || []);
+        return new Response(JSON.stringify({ response }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      try {
+        // Format context for the AI
+        const contextText = Array.isArray(context) && context.length > 0
+          ? context.map((r: unknown, i: number) => {
+              const record = r as { content?: string; metadata?: unknown };
+              return `Record ${i + 1}: ${record.content || JSON.stringify(r)}`;
+            }).join('\n\n')
+          : 'No specific records found, provide general medical guidance.';
+
+        const systemPrompt = `You are MediVaultAI, a HIPAA-compliant medical AI assistant. You help healthcare professionals query encrypted patient records securely.
+
+Key behaviors:
+- Provide accurate, evidence-based medical information
+- Always remind users that data was processed securely with encryption
+- Format responses with clear sections using markdown
+- Include relevant clinical recommendations when appropriate
+- Never fabricate patient data - only reference what's in the provided context
+- Maintain a professional, clinical tone
+- End responses with a note about encryption/privacy when relevant
+
+Available patient records context:
+${contextText}`;
+
+        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: query }
+            ],
+          }),
+        });
+
+        if (!aiResponse.ok) {
+          const errorText = await aiResponse.text();
+          console.error('Lovable AI error:', aiResponse.status, errorText);
+          
+          if (aiResponse.status === 429) {
+            return new Response(JSON.stringify({ 
+              error: 'Rate limit exceeded. Please try again in a moment.' 
+            }), {
+              status: 429,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          if (aiResponse.status === 402) {
+            return new Response(JSON.stringify({ 
+              error: 'AI credits exhausted. Please add credits to continue.' 
+            }), {
+              status: 402,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          
+          throw new Error('AI generation failed');
+        }
+
+        const aiData = await aiResponse.json();
+        const generatedResponse = aiData.choices?.[0]?.message?.content || 
+          generateFallbackResponse(query, context || []);
+
+        console.log('AI response generated successfully');
+
+        return new Response(JSON.stringify({ response: generatedResponse }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+
+      } catch (aiError) {
+        console.error('AI generation error:', aiError);
+        const response = generateFallbackResponse(query, context || []);
+        return new Response(JSON.stringify({ response }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     return new Response(JSON.stringify({ error: 'Invalid action' }), {
@@ -234,7 +318,7 @@ function getMockResults(query: string) {
   return mockRecords.slice(0, 2);
 }
 
-function generateMedicalResponse(query: string, context: unknown[]): string {
+function generateFallbackResponse(query: string, context: unknown[]): string {
   const lowerQuery = query.toLowerCase();
   
   if (lowerQuery.includes('diabetes')) {
