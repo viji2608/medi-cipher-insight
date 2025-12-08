@@ -11,6 +11,8 @@ interface SearchRequest {
   query: string;
   indexName?: string;
   topK?: number;
+  action?: string;
+  context?: unknown[];
 }
 
 interface IndexRequest {
@@ -33,13 +35,27 @@ serve(async (req) => {
       throw new Error('CyborgDB API key not configured');
     }
 
-    const url = new URL(req.url);
-    const action = url.searchParams.get('action') || 'search';
+    // Parse body with error handling
+    let body: SearchRequest;
+    try {
+      const rawBody = await req.text();
+      console.log('Raw request body:', rawBody);
+      body = JSON.parse(rawBody);
+    } catch (parseError) {
+      console.error('Body parse error:', parseError);
+      throw new Error('Invalid request body');
+    }
 
+    const action = body.action || 'search';
     console.log(`Medical chat action: ${action}`);
+    console.log('Request body:', JSON.stringify(body));
 
     if (action === 'search') {
-      const { query, indexName = 'medical-records', topK = 5 }: SearchRequest = await req.json();
+      const { query, indexName = 'medical-records', topK = 5 } = body;
+      
+      if (!query) {
+        throw new Error('Query is required');
+      }
       
       console.log(`Searching for: "${query}" in index: ${indexName}`);
 
@@ -84,7 +100,8 @@ serve(async (req) => {
       });
 
     } else if (action === 'index') {
-      const { documents, indexName = 'medical-records' }: IndexRequest = await req.json();
+      const documents = (body as unknown as IndexRequest).documents || [];
+      const indexName = (body as unknown as IndexRequest).indexName || 'medical-records';
       
       console.log(`Indexing ${documents.length} documents to: ${indexName}`);
 
@@ -146,11 +163,11 @@ serve(async (req) => {
 
     } else if (action === 'generate') {
       // Generate AI response based on context
-      const { query, context } = await req.json();
+      const { query, context } = body;
       
       console.log('Generating AI response for query:', query);
 
-      const response = generateMedicalResponse(query, context);
+      const response = generateMedicalResponse(query, context || []);
       
       return new Response(JSON.stringify({ response }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -40,10 +40,9 @@ export function useMedicalChat() {
 
       setEncryptionStatus('searching');
       
-      // Call the edge function
+      // Call the edge function for search
       const { data: searchData, error: searchError } = await supabase.functions.invoke('medical-chat', {
-        body: { query: content },
-        headers: { 'Content-Type': 'application/json' },
+        body: { action: 'search', query: content },
       });
 
       if (searchError) {
@@ -67,11 +66,9 @@ export function useMedicalChat() {
       // Generate response
       const { data: responseData, error: responseError } = await supabase.functions.invoke('medical-chat', {
         body: { 
+          action: 'generate',
           query: content, 
           context: searchData?.results || [],
-        },
-        headers: { 
-          'Content-Type': 'application/json',
         },
       });
 
