@@ -8,10 +8,39 @@ interface ChatInputProps {
   isLoading: boolean;
 }
 
-const exampleQueries = [
-  "What are the treatment options for Type 2 Diabetes in elderly patients?",
-  "Show drug interaction risks for Metformin and Lisinopril",
-  "Summarize hypertension cases in the patient database",
+const exampleCategories = [
+  {
+    label: '🩺 Diagnosis',
+    queries: [
+      "What are common symptoms of Type 2 Diabetes?",
+      "Differential diagnosis for chest pain in a 55-year-old",
+      "Signs and symptoms of hypertensive crisis",
+    ],
+  },
+  {
+    label: '💊 Medications',
+    queries: [
+      "Drug interactions between Metformin and Lisinopril",
+      "Recommended dosing for pediatric amoxicillin",
+      "Contraindications for beta-blockers",
+    ],
+  },
+  {
+    label: '📊 Patient Data',
+    queries: [
+      "Show diabetes patients with A1C above 7%",
+      "List patients on anticoagulant therapy",
+      "Recent lab results for cardiac biomarkers",
+    ],
+  },
+  {
+    label: '📋 Protocols',
+    queries: [
+      "Post-operative care protocol for hip replacement",
+      "Sepsis treatment guidelines",
+      "Diabetic ketoacidosis management steps",
+    ],
+  },
 ];
 
 export function ChatInput({ onSend, isLoading }: ChatInputProps) {
@@ -32,20 +61,47 @@ export function ChatInput({ onSend, isLoading }: ChatInputProps) {
     }
   };
 
+  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+
   return (
     <div className="space-y-3">
-      {/* Example Queries */}
+      {/* Example Query Categories */}
       {!isLoading && (
-        <div className="flex flex-wrap gap-2">
-          {exampleQueries.map((query, i) => (
-            <button
-              key={i}
-              onClick={() => setInput(query)}
-              className="text-xs px-3 py-1.5 rounded-full bg-muted/50 border border-border hover:bg-muted hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
-            >
-              {query.slice(0, 40)}...
-            </button>
-          ))}
+        <div className="space-y-2">
+          {/* Category Pills */}
+          <div className="flex flex-wrap gap-2">
+            {exampleCategories.map((category, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedCategory(selectedCategory === i ? null : i)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
+                  selectedCategory === i
+                    ? 'bg-primary/20 border-primary text-primary'
+                    : 'bg-muted/50 border-border hover:bg-muted hover:border-primary/30 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {category.label}
+              </button>
+            ))}
+          </div>
+          
+          {/* Queries for Selected Category */}
+          {selectedCategory !== null && (
+            <div className="flex flex-wrap gap-2 animate-fade-in">
+              {exampleCategories[selectedCategory].queries.map((query, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setInput(query);
+                    setSelectedCategory(null);
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-card border border-border hover:bg-accent hover:border-primary/30 transition-all text-muted-foreground hover:text-foreground text-left"
+                >
+                  {query}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

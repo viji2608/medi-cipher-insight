@@ -1,9 +1,10 @@
 import React from 'react';
-import { Plus, MessageSquare, Settings, LogOut, Shield } from 'lucide-react';
+import { Plus, MessageSquare, LogOut, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Conversation, User } from '@/types/medical';
 import { cn } from '@/lib/utils';
+import { SettingsDialog } from './SettingsDialog';
 
 interface ChatSidebarProps {
   user: User;
@@ -110,10 +111,7 @@ export function ChatSidebar({
 
         {/* Actions */}
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="flex-1 gap-1.5">
-            <Settings className="w-4 h-4" />
-            Settings
-          </Button>
+          <SettingsDialog />
           <Button
             variant="outline"
             size="sm"
