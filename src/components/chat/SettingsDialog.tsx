@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { useSettings, AppSettings } from '@/contexts/SettingsContext';
 
 interface SettingsDialogProps {
   trigger?: React.ReactNode;
@@ -27,21 +28,39 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ trigger }: SettingsDialogProps) {
   const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState({
-    darkMode: true,
-    notifications: true,
-    soundEffects: false,
-    showEncryptionBadge: true,
-    autoScroll: true,
-    compactMode: false,
-    responseStyle: 'detailed',
-    encryptionLevel: 'aes-256',
-  });
+  const { settings, updateSetting, requestNotificationPermission, playSound } = useSettings();
 
-  const updateSetting = (key: keyof typeof settings, value: boolean | string) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
+  const handleToggle = async (key: keyof AppSettings, value: boolean) => {
+    // Special handling for notifications - request permission
+    if (key === 'notifications' && value) {
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        toast.error('Notification permission denied', {
+          description: 'Please enable notifications in your browser settings',
+        });
+        return;
+      }
+    }
+    
+    // Play sound when enabling sound effects
+    if (key === 'soundEffects' && value) {
+      updateSetting(key, value);
+      setTimeout(() => playSound('notification'), 100);
+    } else {
+      updateSetting(key, value);
+    }
+    
+    const label = key.replace(/([A-Z])/g, ' $1').toLowerCase();
     toast.success('Setting updated', {
-      description: `${key.replace(/([A-Z])/g, ' $1').toLowerCase()} has been ${typeof value === 'boolean' ? (value ? 'enabled' : 'disabled') : `set to ${value}`}`,
+      description: `${label} has been ${value ? 'enabled' : 'disabled'}`,
+    });
+  };
+
+  const handleSelectChange = (key: keyof AppSettings, value: string) => {
+    updateSetting(key, value as AppSettings[typeof key]);
+    const label = key.replace(/([A-Z])/g, ' $1').toLowerCase();
+    toast.success('Setting updated', {
+      description: `${label} set to ${value}`,
     });
   };
 
@@ -81,7 +100,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 <Switch
                   id="dark-mode"
                   checked={settings.darkMode}
-                  onCheckedChange={(v) => updateSetting('darkMode', v)}
+                  onCheckedChange={(v) => handleToggle('darkMode', v)}
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -91,7 +110,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 <Switch
                   id="compact-mode"
                   checked={settings.compactMode}
-                  onCheckedChange={(v) => updateSetting('compactMode', v)}
+                  onCheckedChange={(v) => handleToggle('compactMode', v)}
                 />
               </div>
             </div>
@@ -113,7 +132,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 <Switch
                   id="notifications"
                   checked={settings.notifications}
-                  onCheckedChange={(v) => updateSetting('notifications', v)}
+                  onCheckedChange={(v) => handleToggle('notifications', v)}
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -124,7 +143,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 <Switch
                   id="sound-effects"
                   checked={settings.soundEffects}
-                  onCheckedChange={(v) => updateSetting('soundEffects', v)}
+                  onCheckedChange={(v) => handleToggle('soundEffects', v)}
                 />
               </div>
             </div>
@@ -147,7 +166,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 <Switch
                   id="encryption-badge"
                   checked={settings.showEncryptionBadge}
-                  onCheckedChange={(v) => updateSetting('showEncryptionBadge', v)}
+                  onCheckedChange={(v) => handleToggle('showEncryptionBadge', v)}
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -156,7 +175,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 </Label>
                 <Select
                   value={settings.encryptionLevel}
-                  onValueChange={(v) => updateSetting('encryptionLevel', v)}
+                  onValueChange={(v) => handleSelectChange('encryptionLevel', v)}
                 >
                   <SelectTrigger className="w-32 h-8 text-xs">
                     <SelectValue />
@@ -184,7 +203,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 <Switch
                   id="auto-scroll"
                   checked={settings.autoScroll}
-                  onCheckedChange={(v) => updateSetting('autoScroll', v)}
+                  onCheckedChange={(v) => handleToggle('autoScroll', v)}
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -193,7 +212,7 @@ export function SettingsDialog({ trigger }: SettingsDialogProps) {
                 </Label>
                 <Select
                   value={settings.responseStyle}
-                  onValueChange={(v) => updateSetting('responseStyle', v)}
+                  onValueChange={(v) => handleSelectChange('responseStyle', v)}
                 >
                   <SelectTrigger className="w-32 h-8 text-xs">
                     <SelectValue />

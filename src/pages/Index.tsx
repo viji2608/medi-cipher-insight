@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ChatProvider, useChat } from "@/contexts/ChatContext";
+import { SettingsProvider, useSettings } from "@/contexts/SettingsContext";
 import { LandingPage } from "@/components/LandingPage";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatMessage } from "@/components/chat/ChatMessage";
@@ -36,8 +37,30 @@ function ChatInterface() {
     auditEntries,
     exportAuditLog,
   } = useMedicalChat();
+  const { settings, playSound, showNotification } = useSettings();
 
   const [showDashboard, setShowDashboard] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to new messages
+  useEffect(() => {
+    if (settings.autoScroll && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activeConversation?.messages.length, settings.autoScroll]);
+
+  // Play sound and show notification on new message
+  useEffect(() => {
+    if (activeConversation?.messages.length) {
+      const lastMessage = activeConversation.messages[activeConversation.messages.length - 1];
+      if (lastMessage.role === 'assistant') {
+        playSound('receive');
+        if (document.hidden) {
+          showNotification('MediVaultAI', 'New response received');
+        }
+      }
+    }
+  }, [activeConversation?.messages.length, playSound, showNotification]);
 
   if (!user) return null;
 
@@ -136,9 +159,16 @@ function ChatInterface() {
                 </p>
               </div>
             ) : (
-              activeConversation.messages.map((message) => (
-                <ChatMessage key={message.id} message={message} />
-              ))
+              <>
+                {activeConversation.messages.map((message) => (
+                  <ChatMessage 
+                    key={message.id} 
+                    message={message} 
+                    showEncryptionBadge={settings.showEncryptionBadge}
+                  />
+                ))}
+                <div ref={messagesEndRef} />
+              </>
             )}
           </div>
         </ScrollArea>
@@ -177,9 +207,11 @@ function AppContent() {
 
 const Index = () => {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <SettingsProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </SettingsProvider>
   );
 };
 
