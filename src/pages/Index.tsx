@@ -6,6 +6,7 @@ import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { EncryptionStatus } from "@/components/chat/EncryptionStatus";
+import { ExportDialog } from "@/components/chat/ExportDialog";
 import { PerformanceMetrics } from "@/components/dashboard/PerformanceMetrics";
 import { AuditLogPanel } from "@/components/dashboard/AuditLogPanel";
 import { LatencyChart } from "@/components/dashboard/LatencyChart";
@@ -61,24 +62,29 @@ function ChatInterface() {
             <h1 className="font-semibold text-foreground">MediVaultAI</h1>
             <span className="text-xs text-muted-foreground">• Encrypted Chat</span>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowDashboard(!showDashboard)}
-            className="text-xs"
-          >
-            {showDashboard ? (
-              <>
-                <ChevronUp className="h-3 w-3 mr-1" />
-                Hide Metrics
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-3 w-3 mr-1" />
-                Show Metrics
-              </>
+          <div className="flex items-center gap-2">
+            {activeConversation && (
+              <ExportDialog conversation={activeConversation} />
             )}
-          </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDashboard(!showDashboard)}
+              className="text-xs"
+            >
+              {showDashboard ? (
+                <>
+                  <ChevronUp className="h-3 w-3 mr-1" />
+                  Hide Metrics
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3 w-3 mr-1" />
+                  Show Metrics
+                </>
+              )}
+            </Button>
+          </div>
         </header>
 
         {/* Dashboard Panel */}
