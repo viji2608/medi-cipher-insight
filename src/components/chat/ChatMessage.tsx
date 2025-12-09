@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 
 interface ChatMessageProps {
   message: Message;
+  showEncryptionBadge?: boolean;
 }
 
 function formatMessageContent(content: string) {
@@ -173,7 +174,7 @@ function formatMessageContent(content: string) {
   return elements;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, showEncryptionBadge = true }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
 
@@ -244,7 +245,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           )}
         >
           {/* Encryption Badge */}
-          {message.isEncrypted && (
+          {message.isEncrypted && showEncryptionBadge && (
             <div className="flex items-center gap-1.5 text-xs text-success">
               <Lock className="w-3 h-3" />
               <span>AES-256</span>

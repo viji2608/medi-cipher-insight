@@ -37,6 +37,39 @@
     --sidebar-border: 217 33% 17%;
     --sidebar-ring: 217 91% 60%;
   }
+
+  /* Light mode */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 98%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 168 76% 36%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 258 90% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 158 64% 35%;
+    --success-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 55%;
+    --sidebar-background: 210 40% 98%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 217 91% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 40% 94%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 217 91% 55%;
+  }
 }
 
 @layer base {
@@ -64,3 +97,15 @@
   .animate-fade-in { animation: fadeIn 0.3s ease-out; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 }
+
+/* Compact mode styles */
+.compact .p-4 { padding: 0.75rem; }
+.compact .space-y-4 > * + * { margin-top: 0.75rem; }
+.compact .text-sm { font-size: 0.8125rem; }
+.compact .text-base { font-size: 0.875rem; }
+.compact .rounded-2xl { border-radius: 0.75rem; }
+.compact .px-5 { padding-left: 1rem; padding-right: 1rem; }
+.compact .py-4 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.compact .gap-4 { gap: 0.75rem; }
+.compact .w-10 { width: 2rem; }
+.compact .h-10 { height: 2rem; }
