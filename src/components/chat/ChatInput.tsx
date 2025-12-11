@@ -26,11 +26,27 @@ const exampleCategories = [
     ],
   },
   {
-    label: '📊 Patient Data',
+    label: '🧪 Lab Results',
     queries: [
-      "Show diabetes patients with A1C above 7%",
-      "List patients on anticoagulant therapy",
       "Recent lab results for cardiac biomarkers",
+      "Show patients with elevated liver enzymes",
+      "Complete blood count interpretation guide",
+    ],
+  },
+  {
+    label: '🤧 Allergies',
+    queries: [
+      "List all documented patient allergies",
+      "Cross-reactivity between penicillin and cephalosporins",
+      "Common drug allergy symptoms and management",
+    ],
+  },
+  {
+    label: '💉 Immunizations',
+    queries: [
+      "Recommended adult vaccination schedule",
+      "Pediatric immunization records",
+      "COVID-19 booster eligibility criteria",
     ],
   },
   {
