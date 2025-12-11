@@ -133,16 +133,6 @@ MediVaultAI solves this through **encrypted vector search** powered by CyborgDB:
 ### Prerequisites
 - Node.js 18+ or modern web browser
 - CyborgDB API Key ([Get one here](https://cyborgdb.co))
-- Anthropic API Key (for Claude AI)
-
-### Option 1: Deploy on Lovable (Recommended)
-
-1. **Go to [Lovable.dev](https://medi-cipher-insight.lovable.app)**
-2. **Create a new project**
-3. **Paste the MediVaultAI React component**
-4. **Add your API keys when prompted**
-5. **Deploy instantly** - No configuration needed!
-
 
 
 ## 🎮 Usage Guide
