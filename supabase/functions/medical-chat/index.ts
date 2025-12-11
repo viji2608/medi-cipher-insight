@@ -30,11 +30,6 @@ serve(async (req) => {
   try {
     const CYBORGDB_API_KEY = Deno.env.get('CYBORGDB_API_KEY');
     const CYBORGDB_INDEX_KEY = Deno.env.get('CYBORGDB_INDEX_KEY');
-    
-    if (!CYBORGDB_API_KEY) {
-      console.error('CYBORGDB_API_KEY not configured');
-      throw new Error('CyborgDB API key not configured');
-    }
 
     // Parse body with error handling
     let body: SearchRequest;
@@ -60,39 +55,41 @@ serve(async (req) => {
       
       console.log(`Searching for: "${query}" in index: ${indexName}`);
 
-      // Try CyborgDB, fall back to mock data if unavailable
-      try {
-        const searchResponse = await fetch(`${CYBORGDB_API_URL}/v1/search`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${CYBORGDB_API_KEY}`,
-            'Content-Type': 'application/json',
-            ...(CYBORGDB_INDEX_KEY && { 'X-Index-Key': CYBORGDB_INDEX_KEY }),
-          },
-          body: JSON.stringify({
-            index: indexName,
-            query,
-            top_k: topK,
-            model: 'all-MiniLM-L6-v2',
-          }),
-        });
-
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.json();
-          console.log(`Found ${searchData.results?.length || 0} results from CyborgDB`);
-
-          return new Response(JSON.stringify({
-            results: searchData.results || [],
-            source: 'cyborgdb',
-          }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      // Try CyborgDB if configured, otherwise use mock data
+      if (CYBORGDB_API_KEY) {
+        try {
+          const searchResponse = await fetch(`${CYBORGDB_API_URL}/v1/search`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${CYBORGDB_API_KEY}`,
+              'Content-Type': 'application/json',
+              ...(CYBORGDB_INDEX_KEY && { 'X-Index-Key': CYBORGDB_INDEX_KEY }),
+            },
+            body: JSON.stringify({
+              index: indexName,
+              query,
+              top_k: topK,
+              model: 'all-MiniLM-L6-v2',
+            }),
           });
+
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            console.log(`Found ${searchData.results?.length || 0} results from CyborgDB`);
+
+            return new Response(JSON.stringify({
+              results: searchData.results || [],
+              source: 'cyborgdb',
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          
+          const errorText = await searchResponse.text();
+          console.error('CyborgDB search error:', searchResponse.status, errorText);
+        } catch (fetchError) {
+          console.log('CyborgDB not available, using demo mode:', fetchError);
         }
-        
-        const errorText = await searchResponse.text();
-        console.error('CyborgDB search error:', searchResponse.status, errorText);
-      } catch (fetchError) {
-        console.log('CyborgDB not available, using demo mode:', fetchError);
       }
 
       // Fallback to mock results
@@ -343,17 +340,44 @@ function getMockResults(query: string) {
       metadata: { condition: 'Post-surgical', department: 'Surgery' },
       score: 0.72,
     },
+    {
+      id: 'rec-004',
+      content: 'Lab Results: CBC within normal limits. Liver enzymes: ALT 52 U/L (slightly elevated), AST 48 U/L. Cardiac biomarkers negative.',
+      metadata: { condition: 'Lab Work', department: 'Laboratory' },
+      score: 0.88,
+    },
+    {
+      id: 'rec-005',
+      content: 'Documented allergies: Penicillin (rash), Sulfa drugs (anaphylaxis). Cross-reactivity assessment completed. Alternative antibiotics noted.',
+      metadata: { condition: 'Allergies', department: 'Immunology' },
+      score: 0.91,
+    },
+    {
+      id: 'rec-006',
+      content: 'Immunization status: COVID-19 booster due. Influenza vaccine current. Tdap up to date. Pneumococcal vaccine recommended.',
+      metadata: { condition: 'Preventive Care', department: 'Primary Care' },
+      score: 0.84,
+    },
   ];
 
   // Simple keyword matching for demo
-  if (lowerQuery.includes('diabetes') || lowerQuery.includes('blood sugar') || lowerQuery.includes('glucose')) {
+  if (lowerQuery.includes('diabetes') || lowerQuery.includes('blood sugar') || lowerQuery.includes('glucose') || lowerQuery.includes('a1c')) {
     return [mockRecords[0]];
   }
-  if (lowerQuery.includes('blood pressure') || lowerQuery.includes('hypertension') || lowerQuery.includes('cardiac')) {
+  if (lowerQuery.includes('blood pressure') || lowerQuery.includes('hypertension') || lowerQuery.includes('bp')) {
     return [mockRecords[1]];
   }
   if (lowerQuery.includes('surgery') || lowerQuery.includes('operative')) {
     return [mockRecords[2]];
+  }
+  if (lowerQuery.includes('lab') || lowerQuery.includes('cbc') || lowerQuery.includes('blood count') || lowerQuery.includes('liver') || lowerQuery.includes('enzyme') || lowerQuery.includes('biomarker') || lowerQuery.includes('cardiac')) {
+    return [mockRecords[3]];
+  }
+  if (lowerQuery.includes('allerg') || lowerQuery.includes('penicillin') || lowerQuery.includes('cephalosporin') || lowerQuery.includes('cross-react')) {
+    return [mockRecords[4]];
+  }
+  if (lowerQuery.includes('vaccin') || lowerQuery.includes('immuniz') || lowerQuery.includes('booster') || lowerQuery.includes('covid') || lowerQuery.includes('pediatric')) {
+    return [mockRecords[5]];
   }
   
   return mockRecords.slice(0, 2);
@@ -480,6 +504,139 @@ Searching encrypted records for: **Cardiac/Surgical History**
 - ❌ Fever >101°F (38.3°C)
 - ❌ Wound drainage or redness${privacyFooter}`;
   }
+
+  // Lab Results queries
+  if (lowerQuery.includes('lab') || lowerQuery.includes('cbc') || lowerQuery.includes('blood count') || lowerQuery.includes('liver') || lowerQuery.includes('enzyme') || lowerQuery.includes('biomarker')) {
+    return `${securityHeader}### 📊 Query Analysis
+Searching encrypted records for: **Laboratory Results**
+
+### 📋 Complete Blood Count (CBC) - Patient P-001
+
+| Test | Value | Reference Range | Status |
+|------|-------|-----------------|--------|
+| **WBC** | 7.2 x10³/µL | 4.5-11.0 | ✓ Normal |
+| **RBC** | 4.8 x10⁶/µL | 4.5-5.5 | ✓ Normal |
+| **Hemoglobin** | 14.2 g/dL | 13.5-17.5 | ✓ Normal |
+| **Hematocrit** | 42% | 38-50% | ✓ Normal |
+| **Platelets** | 245 x10³/µL | 150-400 | ✓ Normal |
+| **MCV** | 88 fL | 80-100 | ✓ Normal |
+
+### 🧪 Comprehensive Metabolic Panel
+
+| Test | Value | Reference Range | Status |
+|------|-------|-----------------|--------|
+| **ALT** | 52 U/L | 7-56 | ⚠️ Upper limit |
+| **AST** | 48 U/L | 10-40 | ⚠️ Elevated |
+| **ALP** | 85 U/L | 44-147 | ✓ Normal |
+| **Bilirubin** | 0.9 mg/dL | 0.1-1.2 | ✓ Normal |
+| **Creatinine** | 1.1 mg/dL | 0.7-1.3 | ✓ Normal |
+| **BUN** | 18 mg/dL | 7-20 | ✓ Normal |
+
+### 💓 Cardiac Biomarkers
+
+| Test | Value | Reference Range | Status |
+|------|-------|-----------------|--------|
+| **Troponin I** | <0.04 ng/mL | <0.04 | ✓ Normal |
+| **BNP** | 85 pg/mL | <100 | ✓ Normal |
+| **CK-MB** | 3.2 ng/mL | 0-5 | ✓ Normal |
+
+### 💡 Interpretation Guide
+- ✓ **Normal values** indicate healthy organ function
+- ⚠️ **Borderline values** require monitoring
+- ❌ **Critical values** need immediate attention
+- 📅 Recommend repeat liver enzymes in 4-6 weeks${privacyFooter}`;
+  }
+
+  // Allergy queries
+  if (lowerQuery.includes('allerg') || lowerQuery.includes('penicillin') || lowerQuery.includes('cephalosporin') || lowerQuery.includes('cross-react')) {
+    return `${securityHeader}### 📊 Query Analysis
+Searching encrypted records for: **Allergy Information**
+
+### 📋 Documented Allergies - Patient Database
+
+| Patient | Allergen | Reaction Type | Severity |
+|---------|----------|---------------|----------|
+| P-001 | **Penicillin** | Rash, Hives | ⚠️ Moderate |
+| P-002 | **Sulfa drugs** | Anaphylaxis | ❌ Severe |
+| P-003 | **Iodine contrast** | Urticaria | ⚠️ Moderate |
+| P-004 | **Latex** | Contact dermatitis | Mild |
+
+### 💊 Cross-Reactivity: Penicillin & Cephalosporins
+
+| Risk Factor | Details |
+|-------------|---------|
+| **Overall Risk** | 1-2% cross-reactivity (historically overestimated) |
+| **Highest Risk** | First-generation cephalosporins |
+| **Lower Risk** | Third/fourth-generation cephalosporins |
+
+### ⚠️ Clinical Guidance
+
+**Safe Alternatives for Penicillin Allergy:**
+- ✓ Azithromycin (respiratory infections)
+- ✓ Fluoroquinolones (UTI, pneumonia)
+- ✓ Vancomycin (serious gram-positive)
+- ✓ Third-gen cephalosporins (with monitoring)
+
+**When to Avoid All Beta-Lactams:**
+- ❌ History of anaphylaxis to penicillin
+- ❌ Severe reactions (Stevens-Johnson, angioedema)
+- ❌ Reaction to multiple beta-lactams
+
+### 💡 Allergy Management Tips
+- ℹ️ Document reaction details thoroughly
+- ℹ️ Consider allergy testing if history unclear
+- ℹ️ Update allergy lists at every visit
+- ℹ️ Provide patient with allergy card${privacyFooter}`;
+  }
+
+  // Immunization queries
+  if (lowerQuery.includes('vaccin') || lowerQuery.includes('immuniz') || lowerQuery.includes('booster') || lowerQuery.includes('covid') || lowerQuery.includes('pediatric')) {
+    return `${securityHeader}### 📊 Query Analysis
+Searching encrypted records for: **Immunization Records**
+
+### 📋 Adult Vaccination Schedule (CDC Guidelines)
+
+| Vaccine | Frequency | Last Due | Status |
+|---------|-----------|----------|--------|
+| **Influenza** | Annual | Fall 2024 | ⚠️ Due |
+| **Tdap/Td** | Every 10 years | 2020 | ✓ Current |
+| **COVID-19** | Per updated guidance | 2024 | ✓ Current |
+| **Pneumococcal** | Age 65+ or high-risk | - | ℹ️ Assess |
+| **Shingles** | Age 50+ (2 doses) | - | ℹ️ Assess |
+
+### 💉 COVID-19 Booster Eligibility
+
+| Population | Recommendation |
+|------------|----------------|
+| **Age 65+** | ✓ Eligible for updated vaccine |
+| **Immunocompromised** | ✓ Additional doses recommended |
+| **Age 6 months - 64** | ✓ 1 dose updated vaccine |
+| **Recent infection** | ⏳ Wait 3 months post-infection |
+
+### 👶 Pediatric Immunization Schedule
+
+| Age | Vaccines Due |
+|-----|--------------|
+| **2 months** | DTaP, IPV, Hib, PCV, RV, HepB |
+| **4 months** | DTaP, IPV, Hib, PCV, RV |
+| **6 months** | DTaP, IPV, Hib, PCV, RV, Flu |
+| **12-15 months** | MMR, Varicella, HepA, PCV, Hib |
+| **4-6 years** | DTaP, IPV, MMR, Varicella |
+
+### 📈 Immunization Compliance
+
+| Metric | Value |
+|--------|-------|
+| **Patient P-001** | 95% compliant |
+| **Overdue vaccines** | Influenza (1) |
+| **Next appointment** | Scheduled |
+
+### 💡 Clinical Notes
+- ℹ️ Check immunization registry for complete history
+- ℹ️ Document contraindications and exemptions
+- ℹ️ Provide VIS (Vaccine Information Statements)
+- ℹ️ Report adverse events to VAERS${privacyFooter}`;
+  }
   
   return `${securityHeader}### 📊 Query Analysis
 - **Search Terms:** "${query.slice(0, 50)}${query.length > 50 ? '...' : ''}"
@@ -500,12 +657,14 @@ To get more specific results, try queries like:
 - "Show diabetes patients with HbA1c > 7%"
 - "List current medications for patient P-001"
 - "Blood pressure trends for hypertensive patients"
-- "Post-operative protocols for cardiac surgery"
+- "Complete blood count interpretation guide"
 
 ### ℹ️ Available Query Categories
 ✓ Diabetes management
 ✓ Hypertension protocols  
 ✓ Medication interactions
 ✓ Cardiac care
-✓ Lab results analysis${privacyFooter}`;
+✓ Lab results analysis
+✓ Allergy information
+✓ Immunization records${privacyFooter}`;
 }
