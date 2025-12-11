@@ -3,7 +3,10 @@
 
 export function generateEncryptedHash(content: string): string {
   // Create a pseudo-encrypted hash for visual demonstration
-  const base64 = btoa(content.slice(0, 20));
+  // Use TextEncoder to handle Unicode characters properly
+  const encoder = new TextEncoder();
+  const utf8Bytes = encoder.encode(content.slice(0, 20));
+  const base64 = btoa(String.fromCharCode(...utf8Bytes));
   const randomSuffix = Array.from({ length: 16 }, () => 
     Math.floor(Math.random() * 16).toString(16)
   ).join('');
