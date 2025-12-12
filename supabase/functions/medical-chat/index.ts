@@ -5,7 +5,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// CyborgDB URL - set CYBORGDB_URL secret when you have a publicly accessible instance
 const CYBORGDB_API_URL = Deno.env.get('CYBORGDB_URL') || "https://api.cyborgdb.com";
 
 interface SearchRequest {
@@ -14,6 +13,7 @@ interface SearchRequest {
   topK?: number;
   action?: string;
   context?: unknown[];
+  role?: string;
 }
 
 interface IndexRequest {
@@ -22,7 +22,6 @@ interface IndexRequest {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -31,7 +30,6 @@ serve(async (req) => {
     const CYBORGDB_API_KEY = Deno.env.get('CYBORGDB_API_KEY');
     const CYBORGDB_INDEX_KEY = Deno.env.get('CYBORGDB_INDEX_KEY');
 
-    // Parse body with error handling
     let body: SearchRequest;
     try {
       const rawBody = await req.text();
@@ -43,7 +41,8 @@ serve(async (req) => {
     }
 
     const action = body.action || 'search';
-    console.log(`Medical chat action: ${action}`);
+    const userRole = body.role || 'doctor';
+    console.log(`Medical chat action: ${action}, role: ${userRole}`);
     console.log('Request body:', JSON.stringify(body));
 
     if (action === 'search') {
@@ -55,7 +54,6 @@ serve(async (req) => {
       
       console.log(`Searching for: "${query}" in index: ${indexName}`);
 
-      // Try CyborgDB if configured, otherwise use mock data
       if (CYBORGDB_API_KEY) {
         try {
           const searchResponse = await fetch(`${CYBORGDB_API_URL}/v1/search`, {
@@ -76,7 +74,6 @@ serve(async (req) => {
           if (searchResponse.ok) {
             const searchData = await searchResponse.json();
             console.log(`Found ${searchData.results?.length || 0} results from CyborgDB`);
-
             return new Response(JSON.stringify({
               results: searchData.results || [],
               source: 'cyborgdb',
@@ -92,10 +89,9 @@ serve(async (req) => {
         }
       }
 
-      // Fallback to mock results
       console.log('Using mock results for demo');
       return new Response(JSON.stringify({
-        results: getMockResults(query),
+        results: getMockResults(query, userRole),
         source: 'demo',
         message: 'Using demo data - configure CyborgDB for production',
       }), {
@@ -108,7 +104,6 @@ serve(async (req) => {
       
       console.log(`Indexing ${documents.length} documents to: ${indexName}`);
 
-      // First, ensure index exists
       const createIndexResponse = await fetch(`${CYBORGDB_API_URL}/v1/indexes`, {
         method: 'POST',
         headers: {
@@ -122,14 +117,12 @@ serve(async (req) => {
         }),
       });
 
-      // Index might already exist, continue regardless
       if (createIndexResponse.ok) {
         console.log('Index created successfully');
       } else {
         console.log('Index may already exist, continuing with upsert');
       }
 
-      // Upsert documents
       const upsertResponse = await fetch(`${CYBORGDB_API_URL}/v1/upsert`, {
         method: 'POST',
         headers: {
@@ -165,7 +158,6 @@ serve(async (req) => {
       });
 
     } else if (action === 'generate') {
-      // Generate AI response using Lovable AI
       const { query, context } = body;
       const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
       
@@ -173,14 +165,13 @@ serve(async (req) => {
 
       if (!LOVABLE_API_KEY) {
         console.error('LOVABLE_API_KEY not configured');
-        const response = generateFallbackResponse(query, context || []);
+        const response = generateFallbackResponse(query, context || [], userRole);
         return new Response(JSON.stringify({ response }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
       try {
-        // Format context for the AI with structured data
         const contextText = Array.isArray(context) && context.length > 0
           ? context.map((r: unknown, i: number) => {
               const record = r as { content?: string; metadata?: Record<string, unknown>; score?: number };
@@ -193,55 +184,28 @@ Relevance Score: ${record.score ? (record.score * 100).toFixed(1) + '%' : 'N/A'}
             }).join('\n\n')
           : 'No specific patient records found in the encrypted database.';
 
-        const systemPrompt = `You are MediVaultAI, a HIPAA-compliant medical AI assistant for healthcare professionals. All patient data is processed using AES-256 encryption and homomorphic search, ensuring complete privacy.
+        const roleContext = getRoleSystemPrompt(userRole);
+        
+        const systemPrompt = `You are MediVaultAI, a HIPAA-compliant medical AI assistant. ${roleContext}
 
-## CRITICAL COMPLIANCE REQUIREMENTS:
-- All responses MUST acknowledge HIPAA compliance
-- Never expose raw patient identifiers (use P-XXX format)
-- Include encryption status in every response
-- Maintain full audit trail awareness
-
-## RESPONSE FORMAT (ALWAYS USE THIS STRUCTURE):
-
+## RESPONSE FORMAT:
 ### 🔐 Security Status
 [State encryption method and compliance]
 
 ### 📊 Query Analysis  
-[Summarize what was searched and why]
+[Summarize what was searched]
 
-### 📋 Clinical Findings
-[Present relevant medical data with clear formatting]
-- Use bullet points for lists
-- Use tables for comparative data
-- Highlight critical values with ⚠️
-- Use ✓ for normal/positive findings
+### 📋 Findings
+[Present relevant data with tables and formatting]
 
-### 💊 Treatment/Recommendations
-[Evidence-based recommendations if applicable]
-
-### 📈 Monitoring & Follow-up
-[Suggested monitoring schedule if relevant]
+### 💊 Recommendations
+[Evidence-based recommendations]
 
 ### 🛡️ Privacy Notice
-[ALWAYS include: Brief note about data protection]
+[Brief note about data protection]
 
-## FORMATTING RULES:
-- Use markdown headers (##, ###)
-- Use tables for medication lists or lab values
-- Use emoji indicators: ✓ (normal), ⚠️ (warning), ❌ (critical), 💡 (tip), ℹ️ (info)
-- Bold important values and drug names
-- Include units for all measurements
-- Reference specific patient IDs as P-XXX (de-identified)
-
-## CLINICAL CONTEXT FROM ENCRYPTED DATABASE:
-${contextText}
-
-## ADDITIONAL GUIDELINES:
-- Be concise but thorough
-- Cite evidence levels when recommending treatments
-- Note drug interactions proactively
-- Suggest specialist referrals when appropriate
-- Always mention if information is from guidelines vs patient records`;
+## CLINICAL CONTEXT:
+${contextText}`;
 
         const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
@@ -255,7 +219,7 @@ ${contextText}
               { role: 'system', content: systemPrompt },
               { role: 'user', content: query }
             ],
-            temperature: 0.3, // Lower temperature for more consistent medical responses
+            temperature: 0.3,
           }),
         });
 
@@ -285,7 +249,7 @@ ${contextText}
 
         const aiData = await aiResponse.json();
         const generatedResponse = aiData.choices?.[0]?.message?.content || 
-          generateFallbackResponse(query, context || []);
+          generateFallbackResponse(query, context || [], userRole);
 
         console.log('AI response generated successfully');
 
@@ -295,7 +259,7 @@ ${contextText}
 
       } catch (aiError) {
         console.error('AI generation error:', aiError);
-        const response = generateFallbackResponse(query, context || []);
+        const response = generateFallbackResponse(query, context || [], userRole);
         return new Response(JSON.stringify({ response }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -318,79 +282,183 @@ ${contextText}
   }
 });
 
-function getMockResults(query: string) {
-  const lowerQuery = query.toLowerCase();
-  
-  const mockRecords = [
-    {
-      id: 'rec-001',
-      content: 'Patient presents with Type 2 Diabetes Mellitus. Current HbA1c: 7.2%. Treatment: Metformin 1000mg twice daily. Last retinal exam: normal.',
-      metadata: { condition: 'Diabetes', department: 'Endocrinology' },
-      score: 0.89,
-    },
-    {
-      id: 'rec-002',
-      content: 'Hypertension management protocol: Target BP <130/80. Current medications: Lisinopril 20mg daily, Amlodipine 5mg daily.',
-      metadata: { condition: 'Hypertension', department: 'Cardiology' },
-      score: 0.85,
-    },
-    {
-      id: 'rec-003',
-      content: 'Post-operative care following appendectomy. No complications. Wound healing well. Follow-up in 2 weeks.',
-      metadata: { condition: 'Post-surgical', department: 'Surgery' },
-      score: 0.72,
-    },
-    {
-      id: 'rec-004',
-      content: 'Lab Results: CBC within normal limits. Liver enzymes: ALT 52 U/L (slightly elevated), AST 48 U/L. Cardiac biomarkers negative.',
-      metadata: { condition: 'Lab Work', department: 'Laboratory' },
-      score: 0.88,
-    },
-    {
-      id: 'rec-005',
-      content: 'Documented allergies: Penicillin (rash), Sulfa drugs (anaphylaxis). Cross-reactivity assessment completed. Alternative antibiotics noted.',
-      metadata: { condition: 'Allergies', department: 'Immunology' },
-      score: 0.91,
-    },
-    {
-      id: 'rec-006',
-      content: 'Immunization status: COVID-19 booster due. Influenza vaccine current. Tdap up to date. Pneumococcal vaccine recommended.',
-      metadata: { condition: 'Preventive Care', department: 'Primary Care' },
-      score: 0.84,
-    },
-  ];
-
-  // Simple keyword matching for demo
-  if (lowerQuery.includes('diabetes') || lowerQuery.includes('blood sugar') || lowerQuery.includes('glucose') || lowerQuery.includes('a1c')) {
-    return [mockRecords[0]];
-  }
-  if (lowerQuery.includes('blood pressure') || lowerQuery.includes('hypertension') || lowerQuery.includes('bp')) {
-    return [mockRecords[1]];
-  }
-  if (lowerQuery.includes('surgery') || lowerQuery.includes('operative')) {
-    return [mockRecords[2]];
-  }
-  if (lowerQuery.includes('lab') || lowerQuery.includes('cbc') || lowerQuery.includes('blood count') || lowerQuery.includes('liver') || lowerQuery.includes('enzyme') || lowerQuery.includes('biomarker') || lowerQuery.includes('cardiac')) {
-    return [mockRecords[3]];
-  }
-  if (lowerQuery.includes('allerg') || lowerQuery.includes('penicillin') || lowerQuery.includes('cephalosporin') || lowerQuery.includes('cross-react')) {
-    return [mockRecords[4]];
-  }
-  if (lowerQuery.includes('vaccin') || lowerQuery.includes('immuniz') || lowerQuery.includes('booster') || lowerQuery.includes('covid') || lowerQuery.includes('pediatric')) {
-    return [mockRecords[5]];
-  }
-  
-  return mockRecords.slice(0, 2);
+function getRoleSystemPrompt(role: string): string {
+  const prompts: Record<string, string> = {
+    doctor: 'You are assisting a physician with diagnosis, treatment planning, and patient management. Provide detailed clinical guidance with evidence-based recommendations.',
+    clinician: 'You are assisting a clinical staff member with patient care, procedures, and monitoring. Focus on practical nursing protocols and patient safety.',
+    admin: 'You are assisting a healthcare administrator with compliance, analytics, and operational metrics. Provide clear data summaries and actionable insights.',
+    researcher: 'You are assisting a clinical researcher with data analysis, trial management, and outcomes research. Focus on statistical rigor and methodology.',
+  };
+  return prompts[role] || prompts.doctor;
 }
 
-function generateFallbackResponse(query: string, context: unknown[]): string {
+function getMockResults(query: string, role: string) {
   const lowerQuery = query.toLowerCase();
-  const recordCount = Array.isArray(context) ? context.length : 0;
+  
+  // DOCTOR-specific mock data
+  const doctorRecords = {
+    diagnosis: [
+      { id: 'dx-001', content: 'Patient M, 55yo, presents with chest pain. ECG shows ST elevation in leads II, III, aVF. Troponin elevated at 2.4 ng/mL. Diagnosis: Inferior STEMI. Cath lab activated.', metadata: { condition: 'Acute MI', department: 'Cardiology' }, score: 0.95 },
+      { id: 'dx-002', content: 'Differential for chest pain in 55yo: ACS (high suspicion given ECG), PE (D-dimer pending), aortic dissection (CT angiogram ordered), pericarditis, GERD, musculoskeletal.', metadata: { condition: 'Chest Pain DDx', department: 'Emergency' }, score: 0.92 },
+    ],
+    treatment: [
+      { id: 'tx-001', content: 'First-line hypertension treatment: Lifestyle modifications + ACE inhibitor (lisinopril 10mg) or ARB if ACE intolerant. Target BP <130/80 per JNC guidelines.', metadata: { condition: 'Hypertension', department: 'Internal Medicine' }, score: 0.94 },
+      { id: 'tx-002', content: 'Insulin titration for T2DM: Start basal insulin 10 units at bedtime. Increase by 2 units every 3 days until fasting glucose <130 mg/dL. Add mealtime insulin if HbA1c remains >7%.', metadata: { condition: 'Diabetes', department: 'Endocrinology' }, score: 0.91 },
+    ],
+    history: [
+      { id: 'hx-001', content: 'Patient cardiac history: Prior MI 2019, CABG x3 2020, EF 40%, on aspirin/statin/beta-blocker/ACE-I. Last echo showed moderate LV dysfunction.', metadata: { condition: 'CAD', department: 'Cardiology' }, score: 0.93 },
+      { id: 'hx-002', content: 'Recurrent UTI patients (last 6 months): P-012 (3 episodes, E.coli), P-045 (2 episodes, Klebsiella), P-078 (4 episodes, resistant strain - urology referral).', metadata: { condition: 'Recurrent UTI', department: 'Urology' }, score: 0.89 },
+    ],
+    interactions: [
+      { id: 'int-001', content: 'Warfarin + Antibiotics: Ciprofloxacin increases INR significantly. Metronidazole also increases bleeding risk. Safe alternatives: Nitrofurantoin, Cephalexin (monitor closely).', metadata: { condition: 'Drug Interaction', department: 'Pharmacy' }, score: 0.96 },
+      { id: 'int-002', content: 'Safe analgesics for SSRI patients: Acetaminophen (first-line), low-dose tramadol (monitor serotonin syndrome). Avoid: High-dose NSAIDs (bleeding risk), tramadol >100mg.', metadata: { condition: 'Drug Interaction', department: 'Psychiatry' }, score: 0.92 },
+    ],
+  };
+
+  // CLINICIAN-specific mock data
+  const clinicianRecords = {
+    labs: [
+      { id: 'lab-001', content: 'Critical lab values today: P-034 K+ 6.8 mEq/L (CRITICAL), P-089 Glucose 42 mg/dL (CRITICAL), P-112 Troponin 1.8 ng/mL (elevated). All providers notified.', metadata: { condition: 'Critical Labs', department: 'Laboratory' }, score: 0.97 },
+      { id: 'lab-002', content: 'HbA1c trends for diabetic patients: P-001: 8.2%→7.4%→7.1% (improving), P-023: 7.1%→7.8%→8.5% (worsening, needs intervention), P-056: 6.9%→6.8%→6.7% (well-controlled).', metadata: { condition: 'Diabetes Monitoring', department: 'Endocrinology' }, score: 0.93 },
+    ],
+    procedures: [
+      { id: 'proc-001', content: 'Post-colonoscopy monitoring: Vital signs q15min x4, then q30min x2. Watch for: abdominal distension, bloody stool, fever, tachycardia. NPO until alert, then clear liquids.', metadata: { condition: 'Post-Procedure', department: 'GI' }, score: 0.95 },
+      { id: 'proc-002', content: 'Difficult IV access protocol: Ultrasound-guided placement for 2+ failed attempts. Warm compresses, tourniquet 2 min max. Consider PICC for long-term access. Document site and attempts.', metadata: { condition: 'IV Access', department: 'Nursing' }, score: 0.91 },
+    ],
+    vitals: [
+      { id: 'vit-001', content: 'Patients with BP >180/110 today: Room 201 (192/114, symptomatic headache - STAT eval), Room 305 (184/108, asymptomatic - PRN ordered), Room 412 (188/112, recent stroke - neuro notified).', metadata: { condition: 'Hypertensive Crisis', department: 'Critical Care' }, score: 0.96 },
+      { id: 'vit-002', content: 'ICU O2 saturation trends: P-ICU-03: 94%→91%→88% (decreasing, RT at bedside), P-ICU-07: 96%→97%→98% (improving on 2L NC), P-ICU-12: 92%→92%→91% (stable on BiPAP).', metadata: { condition: 'Respiratory', department: 'ICU' }, score: 0.94 },
+    ],
+    allergies: [
+      { id: 'alg-001', content: 'Latex allergy patients on current unit: Room 202 (documented anaphylaxis - latex-free supplies required), Room 315 (contact dermatitis only - standard precautions).', metadata: { condition: 'Latex Allergy', department: 'Nursing' }, score: 0.93 },
+      { id: 'alg-002', content: 'High fall risk patients: Room 208 (score 45, bed alarm active), Room 301 (score 52, 1:1 sitter), Room 410 (score 38, yellow wristband). All have non-skid socks and call light in reach.', metadata: { condition: 'Fall Risk', department: 'Safety' }, score: 0.90 },
+    ],
+  };
+
+  // ADMIN-specific mock data
+  const adminRecords = {
+    analytics: [
+      { id: 'ana-001', content: 'Q4 2024 Wait Times: ED average 42 min (↓8% from Q3), Clinic average 18 min (↑5%), Surgery pre-op 23 min (unchanged). Target: all <30 min.', metadata: { condition: 'Operations', department: 'Administration' }, score: 0.95 },
+      { id: 'ana-002', content: 'Department utilization Q4: OR 78% (capacity 85%), MRI 92% (bottleneck), CT 71%, Cath Lab 83%. Recommendation: Add MRI evening hours.', metadata: { condition: 'Capacity', department: 'Operations' }, score: 0.93 },
+    ],
+    compliance: [
+      { id: 'comp-001', content: 'HIPAA Audit Summary: 2 minor violations (unattended workstations), 0 major breaches. 98.5% compliance rate. Action: Mandatory screen lock training scheduled.', metadata: { condition: 'HIPAA', department: 'Compliance' }, score: 0.96 },
+      { id: 'comp-002', content: 'Staff certifications expiring: 12 BLS (next 30 days), 5 ACLS (next 30 days), 3 DEA licenses (next 60 days). Auto-reminders sent. 2 physicians need immediate renewal.', metadata: { condition: 'Credentials', department: 'Medical Staff' }, score: 0.92 },
+    ],
+    staff: [
+      { id: 'stf-001', content: 'Overtime report November 2024: Nursing +18% (staff shortage), Lab +8% (equipment delay), Security +22% (special events). Total cost: $127,450 over budget.', metadata: { condition: 'Staffing', department: 'HR' }, score: 0.94 },
+      { id: 'stf-002', content: 'Training completion rates: Hand Hygiene 98%, Fire Safety 94%, Cybersecurity 87% (IT following up), HIPAA 96%. Target: 95% all categories by year-end.', metadata: { condition: 'Training', department: 'Education' }, score: 0.91 },
+    ],
+    billing: [
+      { id: 'bil-001', content: 'Unbilled procedures (last 7 days): 23 surgeries ($1.2M), 45 imaging studies ($89K), 12 ER visits ($34K). Primary cause: missing physician attestations.', metadata: { condition: 'Revenue', department: 'Billing' }, score: 0.95 },
+      { id: 'bil-002', content: 'Insurance rejection rates Q4: Medicare 3.2% (down from 4.1%), Commercial 7.8% (up from 6.2%), Medicaid 5.1% (stable). Top reason: prior auth missing.', metadata: { condition: 'Claims', department: 'Revenue Cycle' }, score: 0.93 },
+    ],
+  };
+
+  // RESEARCHER-specific mock data
+  const researcherRecords = {
+    trials: [
+      { id: 'tri-001', content: 'CARDIO-NOVO Trial: Eligible patients identified - 47 match inclusion criteria (EF 30-40%, age 50-75, stable CHF). 12 already enrolled, 35 pending consent.', metadata: { condition: 'Clinical Trial', department: 'Research' }, score: 0.96 },
+      { id: 'tri-002', content: 'Oncology trials enrollment: BRCA-SELECT 78% (23/30), LUNG-HOPE 45% (18/40), MELANOMA-IMMUNE 92% (46/50). BRCA-SELECT closing enrollment next week.', metadata: { condition: 'Enrollment', department: 'Oncology' }, score: 0.94 },
+    ],
+    population: [
+      { id: 'pop-001', content: 'Hypertension prevalence by age: 30-40: 12%, 40-50: 28%, 50-60: 45%, 60-70: 62%, 70+: 78%. Higher rates in African American population (OR 1.8).', metadata: { condition: 'Epidemiology', department: 'Research' }, score: 0.95 },
+      { id: 'pop-002', content: 'BMI-Diabetes correlation: BMI 25-30: 15% T2DM, BMI 30-35: 32% T2DM, BMI >35: 58% T2DM. Adjusted for age, ethnicity, family history (p<0.001).', metadata: { condition: 'Outcomes', department: 'Endocrinology' }, score: 0.93 },
+    ],
+    outcomes: [
+      { id: 'out-001', content: '30-day mortality post CABG: Overall 2.1%, elective 1.2%, emergent 8.4%. Risk factors: age >75 (OR 2.3), EF <30% (OR 3.1), renal failure (OR 2.8).', metadata: { condition: 'Surgical Outcomes', department: 'Cardiac Surgery' }, score: 0.97 },
+      { id: 'out-002', content: 'Depression treatment efficacy (n=450): SSRI 62% response, SNRI 58% response, combined therapy 78% response. Mean time to response: 6.2 weeks.', metadata: { condition: 'Mental Health', department: 'Psychiatry' }, score: 0.92 },
+    ],
+    publications: [
+      { id: 'pub-001', content: 'De-identified dataset available: 12,450 patient records, diabetes cohort 2019-2024. Variables: demographics, labs, medications, outcomes. IRB approved for external research.', metadata: { condition: 'Data Access', department: 'Research' }, score: 0.95 },
+      { id: 'pub-002', content: 'IRB status: Protocol #2024-089 (approved), #2024-112 (revisions requested - consent language), #2024-145 (under review, expected 2 weeks).', metadata: { condition: 'IRB', department: 'Research Admin' }, score: 0.91 },
+    ],
+  };
+
+  // Match query to appropriate records based on role and keywords
+  const roleRecords: Record<string, Record<string, unknown[]>> = {
+    doctor: doctorRecords,
+    clinician: clinicianRecords,
+    admin: adminRecords,
+    researcher: researcherRecords,
+  };
+
+  const records = roleRecords[role] || doctorRecords;
+
+  // Keyword matching for each role
+  if (role === 'doctor') {
+    if (lowerQuery.includes('diagnosis') || lowerQuery.includes('differential') || lowerQuery.includes('chest pain') || lowerQuery.includes('symptoms')) {
+      return records.diagnosis;
+    }
+    if (lowerQuery.includes('treatment') || lowerQuery.includes('first-line') || lowerQuery.includes('insulin') || lowerQuery.includes('medication') || lowerQuery.includes('regimen') || lowerQuery.includes('post-mi')) {
+      return records.treatment;
+    }
+    if (lowerQuery.includes('history') || lowerQuery.includes('cardiac') || lowerQuery.includes('pre-op') || lowerQuery.includes('uti') || lowerQuery.includes('review') || lowerQuery.includes('patient')) {
+      return records.history;
+    }
+    if (lowerQuery.includes('interaction') || lowerQuery.includes('warfarin') || lowerQuery.includes('analgesic') || lowerQuery.includes('ssri') || lowerQuery.includes('contraindication')) {
+      return records.interactions;
+    }
+  }
+
+  if (role === 'clinician') {
+    if (lowerQuery.includes('lab') || lowerQuery.includes('critical') || lowerQuery.includes('hba1c') || lowerQuery.includes('trend') || lowerQuery.includes('abnormal') || lowerQuery.includes('lipid')) {
+      return records.labs;
+    }
+    if (lowerQuery.includes('procedure') || lowerQuery.includes('colonoscopy') || lowerQuery.includes('iv') || lowerQuery.includes('protocol') || lowerQuery.includes('transfusion') || lowerQuery.includes('monitoring')) {
+      return records.procedures;
+    }
+    if (lowerQuery.includes('vital') || lowerQuery.includes('blood pressure') || lowerQuery.includes('oxygen') || lowerQuery.includes('saturation') || lowerQuery.includes('heart rate') || lowerQuery.includes('bp')) {
+      return records.vitals;
+    }
+    if (lowerQuery.includes('allerg') || lowerQuery.includes('latex') || lowerQuery.includes('fall') || lowerQuery.includes('risk') || lowerQuery.includes('cross-react')) {
+      return records.allergies;
+    }
+  }
+
+  if (role === 'admin') {
+    if (lowerQuery.includes('wait') || lowerQuery.includes('utilization') || lowerQuery.includes('analytics') || lowerQuery.includes('readmission') || lowerQuery.includes('capacity')) {
+      return records.analytics;
+    }
+    if (lowerQuery.includes('hipaa') || lowerQuery.includes('compliance') || lowerQuery.includes('audit') || lowerQuery.includes('certification') || lowerQuery.includes('credential') || lowerQuery.includes('access log')) {
+      return records.compliance;
+    }
+    if (lowerQuery.includes('staff') || lowerQuery.includes('overtime') || lowerQuery.includes('training') || lowerQuery.includes('completion') || lowerQuery.includes('hr')) {
+      return records.staff;
+    }
+    if (lowerQuery.includes('billing') || lowerQuery.includes('unbilled') || lowerQuery.includes('rejection') || lowerQuery.includes('revenue') || lowerQuery.includes('insurance') || lowerQuery.includes('claim')) {
+      return records.billing;
+    }
+  }
+
+  if (role === 'researcher') {
+    if (lowerQuery.includes('trial') || lowerQuery.includes('eligible') || lowerQuery.includes('enrollment') || lowerQuery.includes('adverse') || lowerQuery.includes('oncology')) {
+      return records.trials;
+    }
+    if (lowerQuery.includes('population') || lowerQuery.includes('prevalence') || lowerQuery.includes('correlation') || lowerQuery.includes('demographic') || lowerQuery.includes('bmi')) {
+      return records.population;
+    }
+    if (lowerQuery.includes('outcome') || lowerQuery.includes('mortality') || lowerQuery.includes('efficacy') || lowerQuery.includes('treatment') || lowerQuery.includes('comparison')) {
+      return records.outcomes;
+    }
+    if (lowerQuery.includes('dataset') || lowerQuery.includes('irb') || lowerQuery.includes('publication') || lowerQuery.includes('grant') || lowerQuery.includes('de-identified') || lowerQuery.includes('retrospective')) {
+      return records.publications;
+    }
+  }
+
+  // Default return based on role
+  const defaultRecords = Object.values(records).flat().slice(0, 2);
+  return defaultRecords;
+}
+
+function generateFallbackResponse(query: string, context: unknown[], role: string): string {
+  const lowerQuery = query.toLowerCase();
   const timestamp = new Date().toISOString();
   
   const securityHeader = `### 🔐 Security Status
 ✓ **Encryption:** AES-256-GCM
 ✓ **Protocol:** HIPAA Compliant
+✓ **Role:** ${role.charAt(0).toUpperCase() + role.slice(1)}
 ✓ **Audit ID:** ${Date.now().toString(36).toUpperCase()}
 ✓ **Timestamp:** ${timestamp}
 
@@ -399,272 +467,721 @@ function generateFallbackResponse(query: string, context: unknown[]): string {
   const privacyFooter = `\n\n---\n### 🛡️ Privacy Notice
 All patient data was processed using **homomorphic encryption**. Your query and retrieved records remained encrypted throughout the entire pipeline. This interaction has been logged for HIPAA compliance audit purposes.`;
 
-  if (lowerQuery.includes('diabetes') || lowerQuery.includes('glucose') || lowerQuery.includes('blood sugar')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted records for: **Diabetes Management**
+  // DOCTOR RESPONSES
+  if (role === 'doctor') {
+    if (lowerQuery.includes('differential') || lowerQuery.includes('diagnosis') || lowerQuery.includes('chest pain')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Differential Diagnosis Request** for chest pain in middle-aged patient
 
-### 📋 Clinical Findings
+### 📋 Differential Diagnosis - Chest Pain in 55-Year-Old
 
-| Metric | Value | Status |
-|--------|-------|--------|
-| **Patient ID** | P-001 | Active |
-| **Condition** | Type 2 Diabetes Mellitus | Confirmed |
-| **HbA1c** | 7.2% | ⚠️ Above target |
-| **Target HbA1c** | <7.0% | Per ADA Guidelines |
-| **Fasting Glucose** | 142 mg/dL | ⚠️ Elevated |
+| Diagnosis | Likelihood | Key Features | Workup |
+|-----------|------------|--------------|--------|
+| **Acute Coronary Syndrome** | ⚠️ High | Pressure, radiation to arm/jaw, diaphoresis | ECG, Troponin x3, Cath if STEMI |
+| **Pulmonary Embolism** | Moderate | Pleuritic pain, dyspnea, tachycardia | D-dimer, CT-PA if elevated |
+| **Aortic Dissection** | Lower (rule out) | Tearing pain, BP differential | CT Angio, TEE |
+| **Pericarditis** | Moderate | Positional, friction rub | ECG (diffuse ST), Echo |
+| **GERD/Esophageal** | Lower priority | Burning, postprandial | Clinical, trial PPI |
+| **Musculoskeletal** | Lower priority | Reproducible on palpation | Clinical exam |
 
-### 💊 Current Treatment
-- **Metformin** 1000mg - Twice daily with meals
-- **Last Dose Adjustment:** 3 months ago
+### 💊 Immediate Workup
+1. ✓ **ECG** - Obtain within 10 minutes
+2. ✓ **Troponin** - Stat, repeat at 3h and 6h
+3. ✓ **Chest X-ray** - Rule out other causes
+4. ✓ **D-dimer** - If PE on differential
+5. ✓ **Basic metabolic panel** - Baseline
 
-### 📈 Recommendations
-1. ✓ Continue current medication regimen
-2. ⚠️ Consider adding SGLT2 inhibitor if HbA1c remains >7%
-3. 📅 Schedule follow-up HbA1c in 3 months
-4. 👁️ Annual retinal examination due
-5. 🦶 Comprehensive foot exam recommended${privacyFooter}`;
-  }
-  
-  if (lowerQuery.includes('blood pressure') || lowerQuery.includes('hypertension') || lowerQuery.includes('bp')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted records for: **Hypertension Management**
+### ⚠️ High-Risk Features (HEART Score)
+- Age >65: +1 point
+- Known CAD: +2 points
+- ST deviation: +2 points
+- Elevated troponin: +2 points
+- ≥3 risk factors: +1 point
 
-### 📋 Clinical Findings
+**HEART Score ≥4: Consider cardiology consult and admission**${privacyFooter}`;
+    }
 
-| Metric | Value | Target | Status |
-|--------|-------|--------|--------|
-| **Systolic BP** | 138 mmHg | <130 mmHg | ⚠️ Elevated |
-| **Diastolic BP** | 88 mmHg | <80 mmHg | ⚠️ Elevated |
-| **Heart Rate** | 72 bpm | 60-100 bpm | ✓ Normal |
+    if (lowerQuery.includes('treatment') || lowerQuery.includes('hypertension') || lowerQuery.includes('first-line')) {
+      return `${securityHeader}### 📊 Query Analysis
+**First-Line Treatment Protocol** for newly diagnosed hypertension
 
-### 💊 Current Medications
-| Drug | Dose | Frequency | Notes |
-|------|------|-----------|-------|
-| **Lisinopril** | 20mg | Once daily | Morning |
-| **Amlodipine** | 5mg | Once daily | Evening |
+### 📋 Hypertension Management Algorithm
 
-### 📈 Monitoring & Follow-up
-- 🏠 Home BP monitoring: Twice daily (AM/PM)
-- 📅 Follow-up appointment: 4 weeks
-- 🧪 Renal function panel: Due in 2 weeks
-- 💡 **Tip:** Record readings 30 min after waking${privacyFooter}`;
-  }
-  
-  if (lowerQuery.includes('medication') || lowerQuery.includes('prescription') || lowerQuery.includes('drug')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted prescription database...
+**Stage 1 HTN (130-139/80-89):**
+| Step | Intervention | Duration |
+|------|--------------|----------|
+| 1 | Lifestyle modifications | 3-6 months |
+| 2 | Single agent if BP >130/80 | Reassess 1 month |
 
-### 📋 Active Medications (Patient P-001)
+**Stage 2 HTN (≥140/90):**
+| Step | Intervention | Notes |
+|------|--------------|-------|
+| 1 | Start medication + lifestyle | Immediate |
+| 2 | May need 2 drugs initially | If BP ≥160/100 |
 
-| Medication | Dose | Frequency | Purpose |
-|------------|------|-----------|---------|
-| **Metformin** | 1000mg | BID with meals | Diabetes |
-| **Lisinopril** | 20mg | QD morning | Hypertension |
-| **Amlodipine** | 5mg | QD | Hypertension |
-| **Atorvastatin** | 40mg | QHS | Cholesterol |
+### 💊 First-Line Medications
 
-### ⚠️ Drug Interaction Check
-✓ No significant interactions detected
-✓ No duplicate therapeutic classes
-✓ No contraindicated combinations
+| Drug Class | Example | Starting Dose | Key Indication |
+|------------|---------|---------------|----------------|
+| **ACE Inhibitor** | Lisinopril | 10mg daily | DM, CKD, HF |
+| **ARB** | Losartan | 50mg daily | ACE intolerant |
+| **CCB** | Amlodipine | 5mg daily | Elderly, AA |
+| **Thiazide** | Chlorthalidone | 12.5mg daily | Volume overload |
 
-### 💡 Clinical Notes
-- ℹ️ Hold Metformin 48h before contrast procedures
-- ℹ️ Monitor potassium with ACE inhibitor
-- ℹ️ Statin best absorbed at bedtime${privacyFooter}`;
-  }
+### 📈 Target Goals
+- **General population:** <130/80 mmHg
+- **Diabetes/CKD:** <130/80 mmHg
+- **Elderly (>65):** <130 systolic (if tolerated)
 
-  if (lowerQuery.includes('cardiac') || lowerQuery.includes('heart') || lowerQuery.includes('surgery')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted records for: **Cardiac/Surgical History**
+### ⚠️ Monitoring Requirements
+- ✓ BMP (K+, Cr) baseline and 1-2 weeks after starting ACE/ARB
+- ✓ Home BP monitoring recommended
+- ✓ Follow-up in 4 weeks${privacyFooter}`;
+    }
 
-### 📋 Clinical Findings
+    if (lowerQuery.includes('insulin') || lowerQuery.includes('titration') || lowerQuery.includes('diabetes')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Insulin Titration Protocol** for Type 2 Diabetes
 
-| Parameter | Value | Reference | Status |
-|-----------|-------|-----------|--------|
-| **Patient ID** | P-003 | - | Active |
-| **Procedure** | CABG x3 | - | 6 weeks post-op |
-| **EF** | 45% | >55% | ⚠️ Reduced |
-| **INR** | 2.4 | 2.0-3.0 | ✓ Therapeutic |
+### 📋 Basal Insulin Initiation
 
-### 💊 Post-Operative Medications
-- **Aspirin** 81mg daily (lifelong)
-- **Warfarin** per INR monitoring
-- **Metoprolol** 50mg BID
-- **Atorvastatin** 80mg daily (high-intensity)
+| Parameter | Recommendation |
+|-----------|----------------|
+| **Starting Dose** | 10 units OR 0.1-0.2 units/kg |
+| **Timing** | Bedtime (Glargine/Detemir) |
+| **Target FBG** | 80-130 mg/dL |
 
-### 📈 Monitoring Schedule
-- 🩸 INR: Weekly until stable, then monthly
-- 💓 Echo: 6 months post-op
-- 🏃 Cardiac rehab: In progress
+### 💉 Titration Algorithm
 
-### ⚠️ Red Flags - Seek Immediate Care
-- ❌ Chest pain or pressure
-- ❌ Shortness of breath at rest
-- ❌ Fever >101°F (38.3°C)
-- ❌ Wound drainage or redness${privacyFooter}`;
-  }
+| Fasting Glucose | Adjustment |
+|-----------------|------------|
+| >180 mg/dL | ↑ 4 units |
+| 140-180 mg/dL | ↑ 2 units |
+| 110-139 mg/dL | ↑ 1 unit |
+| 80-109 mg/dL | No change ✓ |
+| <80 mg/dL | ↓ 2-4 units ⚠️ |
 
-  // Lab Results queries
-  if (lowerQuery.includes('lab') || lowerQuery.includes('cbc') || lowerQuery.includes('blood count') || lowerQuery.includes('liver') || lowerQuery.includes('enzyme') || lowerQuery.includes('biomarker')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted records for: **Laboratory Results**
+**Frequency:** Adjust every 3 days until target reached
 
-### 📋 Complete Blood Count (CBC) - Patient P-001
+### 📊 When to Add Mealtime Insulin
 
-| Test | Value | Reference Range | Status |
-|------|-------|-----------------|--------|
-| **WBC** | 7.2 x10³/µL | 4.5-11.0 | ✓ Normal |
-| **RBC** | 4.8 x10⁶/µL | 4.5-5.5 | ✓ Normal |
-| **Hemoglobin** | 14.2 g/dL | 13.5-17.5 | ✓ Normal |
-| **Hematocrit** | 42% | 38-50% | ✓ Normal |
-| **Platelets** | 245 x10³/µL | 150-400 | ✓ Normal |
-| **MCV** | 88 fL | 80-100 | ✓ Normal |
+Consider if:
+- HbA1c remains >7% despite basal optimization
+- Basal dose >0.5 units/kg/day
+- Post-prandial glucose consistently >180 mg/dL
 
-### 🧪 Comprehensive Metabolic Panel
+### ⚠️ Hypoglycemia Prevention
+- ✓ Educate on symptoms (tremor, sweating, confusion)
+- ✓ Keep fast-acting glucose available
+- ✓ Reduce dose if NPO or illness
+- ✓ Consider CGM for frequent hypo events${privacyFooter}`;
+    }
 
-| Test | Value | Reference Range | Status |
-|------|-------|-----------------|--------|
-| **ALT** | 52 U/L | 7-56 | ⚠️ Upper limit |
-| **AST** | 48 U/L | 10-40 | ⚠️ Elevated |
-| **ALP** | 85 U/L | 44-147 | ✓ Normal |
-| **Bilirubin** | 0.9 mg/dL | 0.1-1.2 | ✓ Normal |
-| **Creatinine** | 1.1 mg/dL | 0.7-1.3 | ✓ Normal |
-| **BUN** | 18 mg/dL | 7-20 | ✓ Normal |
+    if (lowerQuery.includes('post-mi') || lowerQuery.includes('medication regimen') || lowerQuery.includes('myocardial')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Post-MI Medication Regimen** per ACC/AHA Guidelines
 
-### 💓 Cardiac Biomarkers
+### 📋 Core DAPT + Medical Therapy
 
-| Test | Value | Reference Range | Status |
-|------|-------|-----------------|--------|
-| **Troponin I** | <0.04 ng/mL | <0.04 | ✓ Normal |
-| **BNP** | 85 pg/mL | <100 | ✓ Normal |
-| **CK-MB** | 3.2 ng/mL | 0-5 | ✓ Normal |
+| Medication | Dose | Duration | Purpose |
+|------------|------|----------|---------|
+| **Aspirin** | 81mg daily | Lifelong | Antiplatelet |
+| **P2Y12 Inhibitor** | Ticagrelor 90mg BID or Clopidogrel 75mg | 12 months | DAPT |
+| **High-intensity Statin** | Atorvastatin 80mg | Lifelong | LDL <70 |
+| **Beta-Blocker** | Metoprolol succinate 50-200mg | 3+ years | Cardioprotection |
+| **ACE-I/ARB** | Lisinopril 10-40mg | Lifelong | LV remodeling |
 
-### 💡 Interpretation Guide
-- ✓ **Normal values** indicate healthy organ function
-- ⚠️ **Borderline values** require monitoring
-- ❌ **Critical values** need immediate attention
-- 📅 Recommend repeat liver enzymes in 4-6 weeks${privacyFooter}`;
-  }
+### 💊 Additional Considerations
 
-  // Allergy queries
-  if (lowerQuery.includes('allerg') || lowerQuery.includes('penicillin') || lowerQuery.includes('cephalosporin') || lowerQuery.includes('cross-react')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted records for: **Allergy Information**
+| Condition | Add |
+|-----------|-----|
+| EF ≤40% | Eplerenone 25-50mg |
+| Diabetes | SGLT2 inhibitor |
+| Residual ischemia | Long-acting nitrate |
+| Recurrent events | PCSK9 inhibitor |
 
-### 📋 Documented Allergies - Patient Database
+### 📈 Follow-Up Schedule
+- ✓ 1 week: Symptom check, wound assessment
+- ✓ 1 month: Lipid panel, adherence
+- ✓ 3 months: Stress test if indicated
+- ✓ 6 months: Echo for EF reassessment
 
-| Patient | Allergen | Reaction Type | Severity |
-|---------|----------|---------------|----------|
-| P-001 | **Penicillin** | Rash, Hives | ⚠️ Moderate |
-| P-002 | **Sulfa drugs** | Anaphylaxis | ❌ Severe |
-| P-003 | **Iodine contrast** | Urticaria | ⚠️ Moderate |
-| P-004 | **Latex** | Contact dermatitis | Mild |
+### ⚠️ Critical Reminders
+- ❌ Do NOT stop DAPT prematurely
+- ⚠️ GI protection with PPI if bleeding risk
+- ℹ️ Cardiac rehabilitation enrollment${privacyFooter}`;
+    }
 
-### 💊 Cross-Reactivity: Penicillin & Cephalosporins
+    if (lowerQuery.includes('interaction') || lowerQuery.includes('warfarin') || lowerQuery.includes('antibiotic')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Drug Interactions** - Warfarin + Antibiotics
 
-| Risk Factor | Details |
-|-------------|---------|
-| **Overall Risk** | 1-2% cross-reactivity (historically overestimated) |
-| **Highest Risk** | First-generation cephalosporins |
-| **Lower Risk** | Third/fourth-generation cephalosporins |
+### 📋 Antibiotic-Warfarin Interaction Risk
 
-### ⚠️ Clinical Guidance
+| Antibiotic | INR Effect | Risk Level | Recommendation |
+|------------|------------|------------|----------------|
+| **Ciprofloxacin** | ↑↑↑ Major | ❌ High | Avoid or reduce warfarin 25-50% |
+| **Metronidazole** | ↑↑ Moderate | ⚠️ High | Reduce warfarin 25-35% |
+| **TMP-SMX** | ↑↑↑ Major | ❌ High | Avoid - choose alternative |
+| **Azithromycin** | ↑ Mild | ⚠️ Moderate | Monitor INR closely |
+| **Cephalexin** | Minimal | ✓ Low | Monitor INR |
+| **Nitrofurantoin** | Minimal | ✓ Low | Safe option for UTI |
+| **Amoxicillin** | ↑ Mild | ⚠️ Moderate | Short course OK, monitor |
 
-**Safe Alternatives for Penicillin Allergy:**
-- ✓ Azithromycin (respiratory infections)
-- ✓ Fluoroquinolones (UTI, pneumonia)
-- ✓ Vancomycin (serious gram-positive)
-- ✓ Third-gen cephalosporins (with monitoring)
+### 💊 Safe Alternatives by Indication
 
-**When to Avoid All Beta-Lactams:**
-- ❌ History of anaphylaxis to penicillin
-- ❌ Severe reactions (Stevens-Johnson, angioedema)
-- ❌ Reaction to multiple beta-lactams
+| Infection | Preferred Antibiotic |
+|-----------|---------------------|
+| **UTI** | Nitrofurantoin, Cephalexin |
+| **Skin/Soft tissue** | Cephalexin, Clindamycin |
+| **Respiratory** | Amoxicillin (short course) |
+| **H. pylori** | Consult GI - needs specific protocol |
 
-### 💡 Allergy Management Tips
-- ℹ️ Document reaction details thoroughly
-- ℹ️ Consider allergy testing if history unclear
-- ℹ️ Update allergy lists at every visit
-- ℹ️ Provide patient with allergy card${privacyFooter}`;
+### 📈 Monitoring Protocol
+1. Check INR within 3-5 days of starting antibiotic
+2. Repeat INR weekly during antibiotic course
+3. Return to baseline schedule 1 week after completion
+
+### ⚠️ Patient Counseling
+- ℹ️ Watch for bleeding signs (bruising, blood in stool/urine)
+- ℹ️ Maintain consistent vitamin K intake
+- ℹ️ Report any new medications to provider${privacyFooter}`;
+    }
   }
 
-  // Immunization queries
-  if (lowerQuery.includes('vaccin') || lowerQuery.includes('immuniz') || lowerQuery.includes('booster') || lowerQuery.includes('covid') || lowerQuery.includes('pediatric')) {
-    return `${securityHeader}### 📊 Query Analysis
-Searching encrypted records for: **Immunization Records**
+  // CLINICIAN RESPONSES
+  if (role === 'clinician') {
+    if (lowerQuery.includes('critical') || lowerQuery.includes('lab value')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Critical Lab Values** - Today's Results Requiring Immediate Action
 
-### 📋 Adult Vaccination Schedule (CDC Guidelines)
+### 📋 Critical Values Alert Summary
 
-| Vaccine | Frequency | Last Due | Status |
-|---------|-----------|----------|--------|
-| **Influenza** | Annual | Fall 2024 | ⚠️ Due |
-| **Tdap/Td** | Every 10 years | 2020 | ✓ Current |
-| **COVID-19** | Per updated guidance | 2024 | ✓ Current |
-| **Pneumococcal** | Age 65+ or high-risk | - | ℹ️ Assess |
-| **Shingles** | Age 50+ (2 doses) | - | ℹ️ Assess |
+| Room | Patient | Lab | Value | Reference | Action |
+|------|---------|-----|-------|-----------|--------|
+| 204 | P-034 | **K+** | 6.8 mEq/L | 3.5-5.0 | ❌ STAT ECG, Calcium, Insulin/D50 |
+| 312 | P-089 | **Glucose** | 42 mg/dL | 70-100 | ❌ D50 push, recheck 15 min |
+| ICU-5 | P-112 | **Troponin** | 1.8 ng/mL | <0.04 | ⚠️ Cardiology notified, serial ECG |
+| 108 | P-156 | **Sodium** | 118 mEq/L | 136-145 | ⚠️ Fluid restrict, hypertonic saline if symptomatic |
+| 215 | P-203 | **Hgb** | 6.2 g/dL | 12-16 | ⚠️ Type & screen, transfuse 2 units |
 
-### 💉 COVID-19 Booster Eligibility
+### 💉 Immediate Response Protocols
 
-| Population | Recommendation |
-|------------|----------------|
-| **Age 65+** | ✓ Eligible for updated vaccine |
-| **Immunocompromised** | ✓ Additional doses recommended |
-| **Age 6 months - 64** | ✓ 1 dose updated vaccine |
-| **Recent infection** | ⏳ Wait 3 months post-infection |
+**Hyperkalemia (K+ >6.5):**
+1. ✓ 12-lead ECG immediately
+2. ✓ Calcium gluconate 1g IV (cardiac stabilization)
+3. ✓ Regular insulin 10 units + D50 50mL IV
+4. ✓ Kayexalate 30g PO if stable
+5. ✓ Consider dialysis if refractory
 
-### 👶 Pediatric Immunization Schedule
+**Hypoglycemia (<50 mg/dL):**
+1. ✓ D50 25mL IV push
+2. ✓ Recheck glucose in 15 minutes
+3. ✓ Start D10 maintenance if recurrent
+4. ✓ Notify provider for insulin adjustment
 
-| Age | Vaccines Due |
-|-----|--------------|
-| **2 months** | DTaP, IPV, Hib, PCV, RV, HepB |
-| **4 months** | DTaP, IPV, Hib, PCV, RV |
-| **6 months** | DTaP, IPV, Hib, PCV, RV, Flu |
-| **12-15 months** | MMR, Varicella, HepA, PCV, Hib |
-| **4-6 years** | DTaP, IPV, MMR, Varicella |
+### 📈 Notification Log
+- All providers notified via pager
+- Acknowledgment documented in EMR
+- Follow-up labs ordered per protocol${privacyFooter}`;
+    }
 
-### 📈 Immunization Compliance
+    if (lowerQuery.includes('colonoscopy') || lowerQuery.includes('post-procedure') || lowerQuery.includes('monitoring checklist')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Post-Colonoscopy Monitoring** Checklist
+
+### 📋 Recovery Phase Monitoring
+
+| Time | Vital Signs | Assessment | Intervention |
+|------|-------------|------------|--------------|
+| **0-15 min** | q5 min | Level of consciousness | Supplemental O2 PRN |
+| **15-30 min** | q10 min | Gag reflex return | HOB elevated 30° |
+| **30-60 min** | q15 min | Abdominal assessment | Clear liquids when alert |
+| **60-120 min** | q30 min | Ambulation readiness | Discharge criteria check |
+
+### ✓ Discharge Criteria Checklist
+
+| Criterion | Status |
+|-----------|--------|
+| Alert and oriented | ☐ |
+| Vital signs stable x 30 min | ☐ |
+| Minimal abdominal discomfort | ☐ |
+| Passed gas or tolerated fluids | ☐ |
+| Responsible adult present | ☐ |
+| Written discharge instructions given | ☐ |
+
+### ⚠️ Red Flags - Notify Provider Immediately
+
+| Sign | Possible Complication |
+|------|----------------------|
+| ❌ **Severe abdominal pain** | Perforation |
+| ❌ **Abdominal distension** | Perforation/bleeding |
+| ❌ **Bloody stool (large amount)** | Post-polypectomy bleed |
+| ❌ **Fever >101°F** | Infection |
+| ❌ **Persistent hypotension** | Bleeding |
+| ❌ **Tachycardia >110** | Bleeding/hypovolemia |
+
+### 📝 Documentation Requirements
+- ✓ Pre-procedure vital signs
+- ✓ Sedation medications and times
+- ✓ Procedure end time
+- ✓ Recovery timeline
+- ✓ Discharge time and condition${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('blood pressure') || lowerQuery.includes('180') || lowerQuery.includes('bp') || lowerQuery.includes('hypertensive')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Patients with BP >180/110** - Current Unit Status
+
+### 📋 Hypertensive Patients Requiring Attention
+
+| Room | BP Reading | Symptoms | Status | Action |
+|------|------------|----------|--------|--------|
+| 201 | 192/114 | ⚠️ Headache, blurred vision | ❌ STAT Eval | Provider at bedside |
+| 305 | 184/108 | None | Asymptomatic | PRN Hydralazine given |
+| 412 | 188/112 | Recent stroke | ⚠️ High risk | Neuro notified, Nicardipine drip |
+| 118 | 182/106 | Chest discomfort | ⚠️ R/O ACS | ECG ordered, Troponin pending |
+
+### 💊 Hypertensive Urgency Protocol
+
+**Asymptomatic (Urgency):**
+| Step | Action | Target |
+|------|--------|--------|
+| 1 | Oral agent (Clonidine 0.1mg or Captopril 25mg) | |
+| 2 | Recheck BP in 30-60 min | ↓ 20-25% in 24h |
+| 3 | Resume/adjust home medications | |
+
+**Symptomatic (Emergency):**
+| Step | Action | Target |
+|------|--------|--------|
+| 1 | IV access, continuous monitoring | |
+| 2 | IV agent (Labetalol, Nicardipine, or Nitroprusside) | ↓ 25% in 1 hour |
+| 3 | ICU transfer if end-organ damage | |
+
+### ⚠️ End-Organ Damage Signs
+- ❌ Encephalopathy (confusion, seizures)
+- ❌ Retinal hemorrhages/papilledema
+- ❌ AKI (rising creatinine)
+- ❌ Acute MI or aortic dissection${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('fall') || lowerQuery.includes('risk') || lowerQuery.includes('high-risk')) {
+      return `${securityHeader}### 📊 Query Analysis
+**High Fall Risk Patients** - Current Unit Assessment
+
+### 📋 Fall Risk Patient Summary
+
+| Room | Morse Score | Risk Level | Interventions Active |
+|------|-------------|------------|---------------------|
+| 208 | 45 | ⚠️ High | Bed alarm, yellow wristband, non-skid socks |
+| 301 | 52 | ❌ Very High | 1:1 sitter, bed rails x2, low bed |
+| 410 | 38 | ⚠️ Moderate | Yellow wristband, ambulate with assist |
+| 225 | 48 | ⚠️ High | Bed alarm, call light in reach, toileting q2h |
+| 317 | 55 | ❌ Very High | 1:1 sitter, restraint-free protocol |
+
+### ✓ Universal Fall Prevention Checklist
+
+| Intervention | All Patients |
+|--------------|--------------|
+| Call light within reach | ☐ |
+| Bed in lowest position | ☐ |
+| Wheels locked | ☐ |
+| Non-skid footwear | ☐ |
+| Room clutter-free | ☐ |
+| Adequate lighting | ☐ |
+
+### 💡 Morse Fall Scale Components
+| Factor | Points |
+|--------|--------|
+| History of falling | 25 |
+| Secondary diagnosis | 15 |
+| Ambulatory aid | 15-30 |
+| IV/heparin lock | 20 |
+| Gait impaired | 10-20 |
+| Mental status impaired | 15 |
+
+**Score ≥45 = High Risk**${privacyFooter}`;
+    }
+  }
+
+  // ADMIN RESPONSES
+  if (role === 'admin') {
+    if (lowerQuery.includes('wait time') || lowerQuery.includes('average')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Wait Times Analysis** - Q4 2024
+
+### 📋 Department Wait Time Summary
+
+| Department | Q3 Avg | Q4 Avg | Change | Target | Status |
+|------------|--------|--------|--------|--------|--------|
+| **Emergency Department** | 46 min | 42 min | ↓ 8.7% | <45 min | ✓ Met |
+| **Outpatient Clinic** | 17 min | 18 min | ↑ 5.9% | <20 min | ✓ Met |
+| **Imaging (Non-urgent)** | 24 min | 22 min | ↓ 8.3% | <30 min | ✓ Met |
+| **Laboratory** | 12 min | 11 min | ↓ 8.3% | <15 min | ✓ Met |
+| **Pharmacy** | 28 min | 31 min | ↑ 10.7% | <25 min | ⚠️ Not Met |
+| **Surgery Pre-op** | 23 min | 23 min | — | <30 min | ✓ Met |
+
+### 📈 Trend Analysis
 
 | Metric | Value |
 |--------|-------|
-| **Patient P-001** | 95% compliant |
-| **Overdue vaccines** | Influenza (1) |
-| **Next appointment** | Scheduled |
+| **Total patient visits** | 45,230 |
+| **Left without being seen (LWBS)** | 2.1% (target <3%) |
+| **Patient satisfaction (wait time)** | 78% (target 80%) |
 
-### 💡 Clinical Notes
-- ℹ️ Check immunization registry for complete history
-- ℹ️ Document contraindications and exemptions
-- ℹ️ Provide VIS (Vaccine Information Statements)
-- ℹ️ Report adverse events to VAERS${privacyFooter}`;
+### 💡 Improvement Recommendations
+1. **Pharmacy:** Add afternoon technician shift
+2. **Peak hours:** 10am-2pm and 5pm-8pm - consider flex staffing
+3. **Registration:** Implement kiosk check-in to reduce bottleneck
+
+### 📊 Month-over-Month Breakdown
+| Month | ED Wait | Clinic Wait |
+|-------|---------|-------------|
+| October | 44 min | 19 min |
+| November | 41 min | 17 min |
+| December | 42 min | 18 min |${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('utilization') || lowerQuery.includes('department') || lowerQuery.includes('capacity')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Department Utilization Rates** - Q4 2024
+
+### 📋 Resource Utilization Summary
+
+| Department | Utilization | Capacity | Status | Recommendation |
+|------------|-------------|----------|--------|----------------|
+| **Operating Rooms** | 78% | 85% | ✓ Optimal | Maintain current scheduling |
+| **MRI** | 92% | 85% | ❌ Over capacity | Add evening hours |
+| **CT Scanner** | 71% | 85% | ⚠️ Under-utilized | Marketing to outpatient |
+| **Cath Lab** | 83% | 85% | ✓ Optimal | On target |
+| **Endoscopy** | 76% | 85% | ✓ Good | Room for growth |
+| **Radiology (X-ray)** | 68% | 85% | ⚠️ Under-utilized | Consolidate hours |
+
+### 📈 MRI Bottleneck Analysis
+
+| Metric | Value |
+|--------|-------|
+| **Average wait for appointment** | 8.3 days |
+| **After-hours requests** | 45/week (unmet) |
+| **Weekend capacity** | 0% (closed) |
+| **Revenue opportunity** | $1.2M annually |
+
+### 💰 Financial Impact
+
+| Department | Revenue/Month | Optimization Potential |
+|------------|--------------|----------------------|
+| MRI (add evening) | +$95,000 | High |
+| OR (reduce turnover) | +$45,000 | Medium |
+| CT (outpatient push) | +$32,000 | Medium |
+
+### 💡 Strategic Recommendations
+1. ✓ **MRI:** Implement 5pm-9pm evening slots (Mon-Fri)
+2. ✓ **OR:** Reduce turnover time from 35→25 min
+3. ✓ **CT:** Partner with referring physicians for outpatient orders${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('hipaa') || lowerQuery.includes('compliance') || lowerQuery.includes('audit')) {
+      return `${securityHeader}### 📊 Query Analysis
+**HIPAA Compliance Audit Summary** - 2024
+
+### 📋 Compliance Scorecard
+
+| Category | Score | Status | Target |
+|----------|-------|--------|--------|
+| **Overall Compliance** | 98.5% | ✓ Excellent | >95% |
+| **Physical Safeguards** | 99.2% | ✓ Excellent | >95% |
+| **Technical Safeguards** | 97.8% | ✓ Good | >95% |
+| **Administrative Safeguards** | 98.1% | ✓ Good | >95% |
+
+### ⚠️ Violations Identified
+
+| Type | Count | Severity | Resolution |
+|------|-------|----------|------------|
+| Unattended workstations | 2 | Minor | Training scheduled |
+| Improper PHI disposal | 0 | — | ✓ Compliant |
+| Unauthorized access | 0 | — | ✓ Compliant |
+| Missing BAAs | 1 | Minor | Vendor follow-up |
+| Encryption gaps | 0 | — | ✓ Compliant |
+
+### 📈 Training Compliance
+
+| Module | Completion Rate | Due |
+|--------|-----------------|-----|
+| Annual HIPAA | 96% | December 31 |
+| Security Awareness | 94% | Ongoing |
+| Phishing Prevention | 91% | Quarterly |
+| Device Security | 89% | Ongoing |
+
+### 💡 Action Items
+1. ✓ Mandatory screen lock training (12/15)
+2. ✓ Update vendor BAA for Lab Corp
+3. ✓ Quarterly phishing simulation scheduled
+4. ✓ Policy review due Q1 2025${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('training') || lowerQuery.includes('completion') || lowerQuery.includes('staff')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Training Completion Rates** by Department
+
+### 📋 Department Training Summary
+
+| Department | Hand Hygiene | Fire Safety | Cybersecurity | HIPAA | Overall |
+|------------|-------------|-------------|---------------|-------|---------|
+| **Nursing** | 99% | 97% | 92% | 98% | ✓ 96.5% |
+| **Laboratory** | 98% | 95% | 88% | 95% | ⚠️ 94.0% |
+| **Radiology** | 97% | 93% | 85% | 94% | ⚠️ 92.3% |
+| **Pharmacy** | 100% | 98% | 91% | 99% | ✓ 97.0% |
+| **Administration** | 95% | 92% | 95% | 97% | ✓ 94.8% |
+| **Environmental Svcs** | 96% | 89% | 78% | 88% | ⚠️ 87.8% |
+| **IT** | 94% | 91% | 99% | 96% | ✓ 95.0% |
+
+### ⚠️ Departments Below Target (95%)
+
+| Department | Gap | Deadline | Action |
+|------------|-----|----------|--------|
+| Radiology | 2.7% | 12/31 | Manager notified |
+| Laboratory | 1.0% | 12/31 | Follow-up emails sent |
+| Environmental Svcs | 7.2% | 01/15 | In-person sessions scheduled |
+
+### 📈 Monthly Trend
+
+| Month | Overall Rate |
+|-------|-------------|
+| October | 91.2% |
+| November | 93.8% |
+| December | 94.7% |
+
+### 💡 Improvement Initiatives
+1. ✓ Cybersecurity: IT conducting department-specific sessions
+2. ✓ Environmental Services: Supervisor-led training days
+3. ✓ Incentive: Departments at 98%+ get recognition award${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('unbilled') || lowerQuery.includes('billing') || lowerQuery.includes('revenue')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Unbilled Procedures** - Last 7 Days
+
+### 📋 Revenue at Risk Summary
+
+| Category | Count | Est. Revenue | Primary Cause |
+|----------|-------|-------------|---------------|
+| **Surgical Procedures** | 23 | $1,245,000 | Missing attestation |
+| **Imaging Studies** | 45 | $89,400 | Incomplete orders |
+| **ER Visits** | 12 | $34,200 | Unsigned notes |
+| **Lab Services** | 156 | $12,300 | Interface delay |
+| **Outpatient Consults** | 8 | $18,600 | Missing diagnosis |
+| **Total** | 244 | $1,399,500 | — |
+
+### ⚠️ High-Value Unbilled Procedures
+
+| Procedure | Date | Provider | Amount | Issue |
+|-----------|------|----------|--------|-------|
+| CABG x3 | 12/05 | Dr. Smith | $125,000 | Attestation missing |
+| Hip Replacement | 12/06 | Dr. Jones | $45,000 | Op note unsigned |
+| Cardiac Cath | 12/08 | Dr. Chen | $28,000 | Missing modifier |
+| Spine Fusion | 12/09 | Dr. Patel | $92,000 | Pre-auth verification |
+
+### 📈 Resolution Timeline
+
+| Action | Deadline | Owner |
+|--------|----------|-------|
+| Provider attestation outreach | 12/13 | Medical Records |
+| Unsigned note follow-up | 12/14 | HIM |
+| Prior auth verification | 12/15 | Pre-Cert Team |
+| Interface issue resolution | 12/12 | IT |
+
+### 💰 Monthly Trend
+| Month | Unbilled at Week End | Resolution Rate |
+|-------|---------------------|-----------------|
+| October | $980K | 94% |
+| November | $1.1M | 91% |
+| December | $1.4M | Pending |${privacyFooter}`;
+    }
   }
-  
+
+  // RESEARCHER RESPONSES  
+  if (role === 'researcher') {
+    if (lowerQuery.includes('eligible') || lowerQuery.includes('trial') || lowerQuery.includes('enrollment')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Clinical Trial Eligibility** - Patient Screening
+
+### 📋 Active Trials Enrollment Status
+
+| Trial ID | Name | Target | Enrolled | Eligible | Status |
+|----------|------|--------|----------|----------|--------|
+| CARD-2024-01 | CARDIO-NOVO | 100 | 23 | 47 | ⚠️ Recruiting |
+| ONCO-2024-15 | BRCA-SELECT | 30 | 28 | 5 | 🔴 Closing Soon |
+| ONCO-2024-22 | LUNG-HOPE | 40 | 18 | 34 | ✓ Active |
+| DM-2024-08 | GLUCOSE-RX | 75 | 42 | 28 | ✓ Active |
+
+### 📋 CARDIO-NOVO Trial - Eligible Patient Details
+
+**Inclusion Criteria:** EF 30-40%, Age 50-75, Stable CHF NYHA II-III
+
+| Patient ID | Age | EF | NYHA Class | Status |
+|------------|-----|-----|------------|--------|
+| P-1024 | 62 | 35% | II | ✓ Eligible - Pending consent |
+| P-1089 | 58 | 38% | III | ✓ Eligible - Scheduled |
+| P-1156 | 71 | 32% | II | ✓ Eligible - Pending labs |
+| P-1203 | 55 | 40% | II | ⚠️ Screen fail - recent MI |
+| P-1267 | 68 | 34% | III | ✓ Eligible - Consented |
+
+### 📈 Enrollment Projections
+- Current enrollment rate: 4.2 patients/month
+- Projected completion: March 2025
+- Recommended: Expand recruitment to satellite clinics
+
+### ⚠️ Adverse Events (Last 30 Days)
+| Event | Severity | Relation | Status |
+|-------|----------|----------|--------|
+| Hypotension | Moderate | Possibly related | Resolved |
+| Fatigue | Mild | Unlikely related | Ongoing |${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('prevalence') || lowerQuery.includes('population') || lowerQuery.includes('age group')) {
+      return `${securityHeader}### 📊 Query Analysis
+**Hypertension Prevalence** by Age Group
+
+### 📋 Population Health Data (N=28,450)
+
+| Age Group | Total Patients | HTN Cases | Prevalence | 95% CI |
+|-----------|---------------|-----------|------------|--------|
+| 18-29 | 3,420 | 178 | 5.2% | 4.5-5.9% |
+| 30-39 | 4,850 | 582 | 12.0% | 11.1-12.9% |
+| 40-49 | 5,210 | 1,459 | 28.0% | 26.8-29.2% |
+| 50-59 | 5,890 | 2,651 | 45.0% | 43.7-46.3% |
+| 60-69 | 4,780 | 2,964 | 62.0% | 60.6-63.4% |
+| 70-79 | 2,890 | 2,196 | 76.0% | 74.4-77.6% |
+| 80+ | 1,410 | 1,100 | 78.0% | 75.8-80.2% |
+
+### 📈 Demographic Subanalysis
+
+| Subgroup | Prevalence | Odds Ratio | p-value |
+|----------|------------|------------|---------|
+| **African American** | 48.2% | 1.82 | <0.001 |
+| **Hispanic** | 38.5% | 1.24 | 0.003 |
+| **White** | 32.1% | 1.00 (ref) | — |
+| **Asian** | 29.8% | 0.89 | 0.045 |
+
+### 💊 Control Rates by Age
+| Age Group | Controlled (<140/90) |
+|-----------|---------------------|
+| 40-49 | 62% |
+| 50-59 | 58% |
+| 60-69 | 54% |
+| 70+ | 48% |
+
+### 📊 Statistical Methods
+- Cross-sectional analysis
+- Logistic regression adjusted for BMI, diabetes, smoking
+- Data period: 2022-2024${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('mortality') || lowerQuery.includes('outcome') || lowerQuery.includes('30-day')) {
+      return `${securityHeader}### 📊 Query Analysis
+**30-Day Mortality** Post Cardiac Surgery
+
+### 📋 Overall Outcomes (N=1,245)
+
+| Outcome | Rate | 95% CI | National Benchmark |
+|---------|------|--------|-------------------|
+| **30-day mortality** | 2.1% | 1.4-2.8% | 2.3% ✓ |
+| **In-hospital mortality** | 1.8% | 1.2-2.4% | 2.0% ✓ |
+| **Major complications** | 8.4% | 7.0-9.8% | 9.1% ✓ |
+| **Readmission (30-day)** | 11.2% | 9.5-12.9% | 12.5% ✓ |
+
+### 📈 Mortality by Procedure Type
+
+| Procedure | N | Mortality | Risk-Adjusted |
+|-----------|---|-----------|---------------|
+| Elective CABG | 680 | 1.2% | ✓ Expected |
+| Urgent CABG | 320 | 3.1% | ✓ Expected |
+| Emergent CABG | 85 | 8.4% | ⚠️ Above expected |
+| Valve replacement | 160 | 2.5% | ✓ Expected |
+
+### ⚠️ Risk Factor Analysis
+
+| Factor | Odds Ratio | 95% CI | p-value |
+|--------|-----------|--------|---------|
+| **Age >75** | 2.34 | 1.8-3.0 | <0.001 |
+| **EF <30%** | 3.12 | 2.4-4.1 | <0.001 |
+| **Renal failure** | 2.81 | 2.1-3.8 | <0.001 |
+| **Diabetes** | 1.65 | 1.3-2.1 | 0.002 |
+| **Prior cardiac surgery** | 2.18 | 1.6-3.0 | <0.001 |
+| **Female sex** | 1.42 | 1.1-1.8 | 0.018 |
+
+### 📊 STS Risk Score Correlation
+- O/E ratio: 0.92 (favorable)
+- C-statistic: 0.78${privacyFooter}`;
+    }
+
+    if (lowerQuery.includes('irb') || lowerQuery.includes('dataset') || lowerQuery.includes('de-identified') || lowerQuery.includes('retrospective')) {
+      return `${securityHeader}### 📊 Query Analysis
+**De-Identified Dataset** for Retrospective Research
+
+### 📋 Available Datasets
+
+| Dataset ID | Description | N | Period | IRB Status |
+|------------|-------------|---|--------|------------|
+| DM-RETRO-2024 | Diabetes Cohort | 12,450 | 2019-2024 | ✓ Approved |
+| CAD-RETRO-2024 | Cardiac Disease | 8,920 | 2018-2024 | ✓ Approved |
+| ONCO-RETRO-2024 | Cancer Registry | 5,680 | 2015-2024 | ✓ Approved |
+| HTN-RETRO-2024 | Hypertension | 18,340 | 2020-2024 | ⏳ Under Review |
+
+### 📋 DM-RETRO-2024 Dataset Variables
+
+| Category | Variables Included |
+|----------|-------------------|
+| **Demographics** | Age, Sex, Race/Ethnicity, ZIP (3-digit) |
+| **Clinical** | HbA1c, FBG, BMI, BP, Lipids (longitudinal) |
+| **Medications** | Metformin, Insulin, SGLT2i, GLP-1 (start/stop dates) |
+| **Outcomes** | Microvascular, Macrovascular, Mortality |
+| **Comorbidities** | HTN, CKD, CVD, Retinopathy |
+
+### 📈 IRB Protocol Status
+
+| Protocol # | Title | Status | Expected |
+|-----------|-------|--------|----------|
+| 2024-089 | Diabetes Outcomes | ✓ Approved | — |
+| 2024-112 | ML Prediction Model | ⚠️ Revisions | Consent language |
+| 2024-145 | Cardiovascular Risk | ⏳ Review | 2 weeks |
+| 2024-156 | Medication Adherence | 📝 Submitted | 4 weeks |
+
+### 💡 Data Access Request Process
+1. Submit IRB protocol (if not exempt)
+2. Complete data use agreement (DUA)
+3. Request specific variables via RedCap
+4. Data delivered to secure research environment${privacyFooter}`;
+    }
+  }
+
+  // Default response
   return `${securityHeader}### 📊 Query Analysis
 - **Search Terms:** "${query.slice(0, 50)}${query.length > 50 ? '...' : ''}"
-- **Records Searched:** ${recordCount} encrypted documents
-- **Search Method:** Homomorphic vector similarity
+- **User Role:** ${role.charAt(0).toUpperCase() + role.slice(1)}
+- **Records Searched:** Encrypted database
 
 ### 📋 Search Results
-Your query has been securely processed through our encrypted medical database.
+Your query has been securely processed. For more specific results, try queries related to your role:
 
-| Metric | Value |
-|--------|-------|
-| **Records Matched** | ${recordCount} |
-| **Encryption Status** | ✓ Maintained |
-| **Privacy Level** | HIPAA Compliant |
-
-### 💡 Suggestions
-To get more specific results, try queries like:
-- "Show diabetes patients with HbA1c > 7%"
-- "List current medications for patient P-001"
-- "Blood pressure trends for hypertensive patients"
-- "Complete blood count interpretation guide"
-
-### ℹ️ Available Query Categories
-✓ Diabetes management
-✓ Hypertension protocols  
-✓ Medication interactions
-✓ Cardiac care
-✓ Lab results analysis
-✓ Allergy information
-✓ Immunization records${privacyFooter}`;
+${role === 'doctor' ? `
+- "Differential diagnosis for chest pain"
+- "First-line treatment for hypertension"
+- "Drug interactions with Warfarin"
+- "Insulin titration protocol"` : ''}
+${role === 'clinician' ? `
+- "Patients with critical lab values today"
+- "Post-colonoscopy monitoring checklist"
+- "Blood pressure monitoring protocol"
+- "High fall risk patients on unit"` : ''}
+${role === 'admin' ? `
+- "Average patient wait times this quarter"
+- "Department utilization rates"
+- "HIPAA compliance audit summary"
+- "Training completion rates by department"` : ''}
+${role === 'researcher' ? `
+- "Eligible patients for diabetes trial"
+- "Hypertension prevalence by age group"
+- "30-day mortality post cardiac surgery"
+- "De-identified dataset for retrospective study"` : ''}${privacyFooter}`;
 }
