@@ -94,8 +94,6 @@ export function ChatInput({
     }
   };
   return <div className="space-y-3">
-      {/* Role indicator */}
-      {user}
 
       {/* Example Query Categories */}
       {!isLoading && <div className="space-y-2">
