@@ -2,65 +2,166 @@ import React, { useState } from 'react';
 import { Send, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/contexts/AuthContext';
+import { UserRole } from '@/types/medical';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   isLoading: boolean;
 }
 
-const exampleCategories = [
-  {
-    label: '🩺 Diagnosis',
-    queries: [
-      "What are common symptoms of Type 2 Diabetes?",
-      "Differential diagnosis for chest pain in a 55-year-old",
-      "Signs and symptoms of hypertensive crisis",
-    ],
-  },
-  {
-    label: '💊 Medications',
-    queries: [
-      "Drug interactions between Metformin and Lisinopril",
-      "Recommended dosing for pediatric amoxicillin",
-      "Contraindications for beta-blockers",
-    ],
-  },
-  {
-    label: '🧪 Lab Results',
-    queries: [
-      "Recent lab results for cardiac biomarkers",
-      "Show patients with elevated liver enzymes",
-      "Complete blood count interpretation guide",
-    ],
-  },
-  {
-    label: '🤧 Allergies',
-    queries: [
-      "List all documented patient allergies",
-      "Cross-reactivity between penicillin and cephalosporins",
-      "Common drug allergy symptoms and management",
-    ],
-  },
-  {
-    label: '💉 Immunizations',
-    queries: [
-      "Recommended adult vaccination schedule",
-      "Pediatric immunization records",
-      "COVID-19 booster eligibility criteria",
-    ],
-  },
-  {
-    label: '📋 Protocols',
-    queries: [
-      "Post-operative care protocol for hip replacement",
-      "Sepsis treatment guidelines",
-      "Diabetic ketoacidosis management steps",
-    ],
-  },
-];
+interface QueryCategory {
+  label: string;
+  queries: string[];
+}
+
+// Role-specific query categories
+const roleBasedCategories: Record<UserRole, QueryCategory[]> = {
+  doctor: [
+    {
+      label: '🩺 Diagnosis',
+      queries: [
+        "Differential diagnosis for chest pain in a 55-year-old",
+        "Signs of acute myocardial infarction",
+        "Symptoms indicating diabetic ketoacidosis",
+      ],
+    },
+    {
+      label: '💊 Treatment Plans',
+      queries: [
+        "First-line treatment for newly diagnosed hypertension",
+        "Insulin titration protocol for Type 2 Diabetes",
+        "Post-MI medication regimen recommendations",
+      ],
+    },
+    {
+      label: '📋 Patient History',
+      queries: [
+        "Retrieve patient cardiac history for pre-op evaluation",
+        "Show patients with recurring UTI in last 6 months",
+        "List patients due for annual diabetes review",
+      ],
+    },
+    {
+      label: '⚠️ Drug Interactions',
+      queries: [
+        "Interactions between Warfarin and new antibiotics",
+        "Safe analgesics for patients on SSRIs",
+        "Contraindications for beta-blockers in asthma",
+      ],
+    },
+  ],
+  clinician: [
+    {
+      label: '🧪 Lab Results',
+      queries: [
+        "Patients with critical lab values today",
+        "Trending HbA1c results for diabetic patients",
+        "Abnormal lipid panels requiring follow-up",
+      ],
+    },
+    {
+      label: '💉 Procedures',
+      queries: [
+        "Post-procedure monitoring checklist for colonoscopy",
+        "IV insertion protocols for difficult access",
+        "Blood transfusion reaction protocols",
+      ],
+    },
+    {
+      label: '📊 Vitals Monitoring',
+      queries: [
+        "Patients with blood pressure above 180/110",
+        "Show oxygen saturation trends for ICU patients",
+        "Alert thresholds for pediatric heart rates",
+      ],
+    },
+    {
+      label: '🤧 Allergies & Alerts',
+      queries: [
+        "Patients with documented latex allergies",
+        "Cross-reactivity between penicillin and cephalosporins",
+        "High-risk fall patients on current unit",
+      ],
+    },
+  ],
+  admin: [
+    {
+      label: '📈 Analytics',
+      queries: [
+        "Average patient wait times this quarter",
+        "Department utilization rates comparison",
+        "Readmission rates by diagnosis category",
+      ],
+    },
+    {
+      label: '🔒 Compliance',
+      queries: [
+        "HIPAA compliance audit summary",
+        "Outstanding staff certification renewals",
+        "Data access logs for sensitive records",
+      ],
+    },
+    {
+      label: '👥 Staff Management',
+      queries: [
+        "Staff overtime hours this month",
+        "Credential expiration alerts for physicians",
+        "Training completion rates by department",
+      ],
+    },
+    {
+      label: '💰 Billing',
+      queries: [
+        "Unbilled procedures from last week",
+        "Insurance claim rejection rates",
+        "Revenue by department this quarter",
+      ],
+    },
+  ],
+  researcher: [
+    {
+      label: '📚 Clinical Trials',
+      queries: [
+        "Eligible patients for diabetes drug trial",
+        "Enrollment status for ongoing oncology studies",
+        "Adverse event reports from active trials",
+      ],
+    },
+    {
+      label: '📊 Population Health',
+      queries: [
+        "Prevalence of hypertension by age group",
+        "Correlation between BMI and diabetes outcomes",
+        "Demographic breakdown of cardiac patients",
+      ],
+    },
+    {
+      label: '🧬 Outcomes Research',
+      queries: [
+        "30-day mortality rates post cardiac surgery",
+        "Treatment efficacy comparison for depression",
+        "Long-term outcomes for joint replacement patients",
+      ],
+    },
+    {
+      label: '📑 Publications',
+      queries: [
+        "De-identified dataset for retrospective study",
+        "Statistical summary for grant application",
+        "IRB approval status for pending studies",
+      ],
+    },
+  ],
+};
 
 export function ChatInput({ onSend, isLoading }: ChatInputProps) {
+  const { user } = useAuth();
   const [input, setInput] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+
+  // Get role-specific categories, default to doctor if not logged in
+  const categories = roleBasedCategories[user?.role || 'doctor'];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,16 +178,23 @@ export function ChatInput({ onSend, isLoading }: ChatInputProps) {
     }
   };
 
-  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
-
   return (
     <div className="space-y-3">
+      {/* Role indicator */}
+      {user && (
+        <div className="text-xs text-muted-foreground text-center">
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-primary/10 text-primary">
+            Queries for: <span className="font-medium capitalize">{user.role}</span>
+          </span>
+        </div>
+      )}
+
       {/* Example Query Categories */}
       {!isLoading && (
         <div className="space-y-2">
           {/* Category Pills */}
           <div className="flex flex-wrap gap-2">
-            {exampleCategories.map((category, i) => (
+            {categories.map((category, i) => (
               <button
                 key={i}
                 onClick={() => setSelectedCategory(selectedCategory === i ? null : i)}
@@ -104,7 +212,7 @@ export function ChatInput({ onSend, isLoading }: ChatInputProps) {
           {/* Queries for Selected Category */}
           {selectedCategory !== null && (
             <div className="flex flex-wrap gap-2 animate-fade-in">
-              {exampleCategories[selectedCategory].queries.map((query, i) => (
+              {categories[selectedCategory].queries.map((query, i) => (
                 <button
                   key={i}
                   onClick={() => {
